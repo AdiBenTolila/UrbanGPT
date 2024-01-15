@@ -2,7 +2,6 @@ import urllib.parse
 import requests
 import json
 
-
 def generate_url(data_dict, program_number):
 
     if(data_dict.get("DOC_NAME") is None):
@@ -11,7 +10,7 @@ def generate_url(data_dict, program_number):
         data_dict["ED_DOC_INFO"] = ""
     if(data_dict.get("DOC_PAGE_NO") is None):
         data_dict["DOC_PAGE_NO"] = 0
-        print (data_dict)
+        # print (data_dict)
         
 
     base_url = "https://mavat.iplan.gov.il/rest/api/Attacments/"
@@ -50,8 +49,8 @@ def program_doc_url(iplan_number , doc_type , program_number):#change!!!!!!!!!!!
     response = requests.get(url2)
     parsed_data = json.loads(response.text)
     generated_urls = []
-    print(parsed_data.keys())
-    print("row",parsed_data[doc_type][0])
+    # print(parsed_data.keys())
+    # print("row",parsed_data[doc_type][0])
     for row in parsed_data[doc_type]:
         # for key in row.keys():
         #     if row[key] is None:
