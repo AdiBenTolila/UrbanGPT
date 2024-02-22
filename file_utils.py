@@ -8,6 +8,8 @@ from PyPDF2 import PdfReader
 import textract
 import re
 from langchain.docstore.document import Document
+from selenium import webdriver
+import time
 
 
 def get_docs_for_plan(plan_number):
@@ -28,6 +30,47 @@ def get_docs_for_plan(plan_number):
                 file.write(response.content)
             yield destination
 
+
+def get_docs_for_plan_selenum(plan_number,redownload=False,retry=3):
+    pwd = os.getcwd()
+    xplan_number = extract_xplan_number(plan_number)
+
+    # URL of the website containing the PDF
+    url = f'https://mavat.iplan.gov.il/SV4/1/{xplan_number}/310'
+
+    # Start a new Chrome browser session
+    chrome_options = webdriver.ChromeOptions()
+    chrome_options.add_argument('--headless')
+    os.makedirs(f'{pwd}/out/{plan_number}', exist_ok=True)
+    # if file already exists, return without downloading
+    if os.listdir(f'{pwd}/out/{plan_number}') and not redownload:
+        return
+    prefs = {'download.default_directory' : f'{pwd}/out/{plan_number}/'}
+    chrome_options.add_experimental_option('prefs', prefs)
+    driver = webdriver.Chrome(options=chrome_options)
+
+    for i in range(retry):
+        try:
+            # Open the webpage
+            driver.get(url)
+            button = driver.find_element('xpath','//a[@title="הוראות התכנית "]')
+            # Download the PDF
+            button.click()
+            # Wait for a few seconds to ensure the PDF is downloaded
+            time.sleep(5)
+            break
+        except:
+            print(f'failed to open webpage, retrying {i+1} out of {retry}')
+            time.sleep(5)
+
+    # if file was not downloaded, remove the folder
+    if not os.listdir(f'{pwd}/out/{plan_number}'):
+        os.rmdir(f'{pwd}/out/{plan_number}')
+        print(f'no file for {plan_number}')
+    else:
+        print(f'downloaded {plan_number}')
+    # Close the browser
+    driver.quit()    
 
 def pdf_to_text(filename):
     pdffileobj = open(filename, 'rb')
