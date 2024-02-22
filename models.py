@@ -7,7 +7,8 @@ from langchain_community.llms import LlamaCpp
 he_en_model_name = "Helsinki-NLP/opus-mt-tc-big-he-en"
 en_he_model_name = "Helsinki-NLP/opus-mt-en-he"
 # embedding_model = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
-embedding_model = "sentence-transformers/all-MiniLM-l6-v2"
+# embedding_model = "sentence-transformers/all-MiniLM-l6-v2"
+embedding_model = "sentence-transformers/LaBSE"
 language_model = "models/mistral-7b-instruct-v0.1.Q4_K_M.gguf"
 
 # Create tokenizer and model instances
@@ -32,10 +33,16 @@ embeddings = HuggingFaceEmbeddings(
 
 
 llm = LlamaCpp(
-    model_path="models/mistral-7b-instruct-v0.1.Q4_K_M.gguf",
+    model_path="models/mistral-7b-instruct-v0.2.Q4_K_M.gguf",
     temperature=0.0,
     max_tokens=1024,
     top_p=1,
     n_ctx=8192,  # Reduce the context size
     verbose=False,
 )
+
+if __name__ == '__main__':
+    # stream llm query
+    for chunk in llm.stream("תכתוב לנו שיר על המרצה אסף הגדול מכולם."):
+        print(chunk, end="", flush=True)
+

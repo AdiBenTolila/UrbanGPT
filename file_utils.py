@@ -10,6 +10,7 @@ import re
 from langchain.docstore.document import Document
 from selenium import webdriver
 import time
+from itertools import chain
 
 
 def get_docs_for_plan(plan_number):
@@ -29,6 +30,13 @@ def get_docs_for_plan(plan_number):
             with open(destination, 'wb') as file:
                 file.write(response.content)
             yield destination
+
+def temp_get_docs_for_plan(plan_number):
+    files = os.listdir(f"out/{plan_number}")
+    for file in files:
+        if "הוראות התכנית" in file:
+            yield f"out/{plan_number}/{file}"
+
 
 
 def get_docs_for_plan_selenum(plan_number,redownload=False,retry=3):
