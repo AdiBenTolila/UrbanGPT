@@ -1,0 +1,6 @@
+out/
+models/
+cacheModels/
+__pycache__/
+.envgi/
+*.ipynb
