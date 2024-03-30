@@ -4,13 +4,15 @@ from urllib.parse import unquote
 import os
 import requests
 from PyPDF2 import PdfReader
-# from langchain_community.document_loaders import PyPDFLoader
 import textract
 import re
 from langchain.docstore.document import Document
 from selenium import webdriver
+from selenium.webdriver.support.ui import WebDriverWait
 import time
+import random
 from itertools import chain
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 
 def get_docs_for_plan(plan_number):
@@ -32,9 +34,11 @@ def get_docs_for_plan(plan_number):
             yield destination
 
 def temp_get_docs_for_plan(plan_number):
+    if not os.path.exists(f"out/{plan_number}"):
+        return
     files = os.listdir(f"out/{plan_number}")
     for file in files:
-        if "הוראות התכנית" in file:
+        if "הוראות" in file:
             yield f"out/{plan_number}/{file}"
 
 
@@ -60,8 +64,13 @@ def get_docs_for_plan_selenum(plan_number,redownload=False,retry=3):
     for i in range(retry):
         try:
             # Open the webpage
+            print(f'opening webpage {url}')
             driver.get(url)
-            button = driver.find_element('xpath','//a[@title="הוראות התכנית "]')
+            button = WebDriverWait(driver, 5).until(lambda x: x.find_element('xpath','//a[@title="הוראות התכנית "]'))
+            if 'gray-disabled' in button.get_attribute('class'):
+                print(f'button is disabled for {plan_number}')
+                break
+
             # Download the PDF
             button.click()
             # Wait for a few seconds to ensure the PDF is downloaded
@@ -69,7 +78,8 @@ def get_docs_for_plan_selenum(plan_number,redownload=False,retry=3):
             break
         except:
             print(f'failed to open webpage, retrying {i+1} out of {retry}')
-            time.sleep(5)
+            amount = random.randint(1, 5)
+            time.sleep(5 + amount)
 
     # if file was not downloaded, remove the folder
     if not os.listdir(f'{pwd}/out/{plan_number}'):
@@ -86,23 +96,39 @@ def pdf_to_text(filename):
     text = ""
     for page in pdfReader.pages:
         text += page.extract_text()
-    # TODO is this the right way to read the text?
-    if text == "":
-        text = textract.process(filename, method='tesseract', language='eng')
+    # TODO
+    # if text == "":
+    #     text = textract.process(filename, method='tesseract', language='eng')
     return text
 
-def clean_and_split(text):
-    # Define the pattern for the unwanted text
-    unwanted_pattern = r'תכנון זמין\s+[0-9]\s+מונה\s+הדפסה'
+def clean_and_split(text, doc_id=None):
+    # # Define the pattern for the unwanted text
+    unwanted_pattern = r'\nתכנון זמין\s+[0-9]\s+מונה\s+הדפסה'
+    cleaned_text = re.sub(unwanted_pattern, '', text)
 
-    # Use re.split to split the text based on the unwanted pattern
-    chunks = re.split(unwanted_pattern, text)
+    # # Use re.split to split the text based on the unwanted pattern
+    # chunks = re.split(unwanted_pattern, text)
 
-    # Remove empty lines in each chunk and filter out empty chunks
-    chunks = [Document(page_content=re.sub(r'\n\s*\n', '\n', chunk).strip(),metadata={"source": "local"}) for chunk in chunks if chunk.strip()]
+    # # Remove empty lines in each chunk and filter out empty chunks
+    # chunks = [Document(page_content=re.sub(r'\n\s*\n', '\n', chunk).strip(),metadata={"source": "local"}) for chunk in chunks if chunk.strip()]
 
-    return chunks
+    # print(cleaned_text)
+    # return chunks
 
+    text_splitter = RecursiveCharacterTextSplitter(
+        separators=["\n\n", "\n","."," ",""],
+        chunk_size=300,
+        chunk_overlap=50,
+        length_function=len,
+        is_separator_regex=False,
+    )
+    texts = text_splitter.create_documents([cleaned_text])
+    for t in texts:
+        t.metadata = {"doc_id": doc_id}
+
+    return texts
+
+    
 # def load_and_split(file):
 #     loader = PyPDFLoader(file)
 #     pages = loader.load_and_split()
@@ -119,3 +145,19 @@ def sentencewise_translate(text,translate_pipe):
     translated_text = '.'.join(sentence_translations)
 
     return translated_text
+
+if __name__ == '__main__':
+    data = pd.read_csv('shpan.csv')
+
+    files_text = (pdf_to_text(doc) for doc in temp_get_docs_for_plan(data['pl_number'][0]))
+
+    # for each doc, clean and split to chunks
+    files_cleand_chunks = [clean_and_split(text) for text in files_text]
+    flattened_documents = list(chain(*files_cleand_chunks))
+    print(type(flattened_documents[0]))
+
+    print(type(files_cleand_chunks[0]))
+
+        
+
+

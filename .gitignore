@@ -2,5 +2,5 @@ out/
 models/
 cacheModels/
 __pycache__/
-.envgi/
+.env/
 *.ipynb

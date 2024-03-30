@@ -138,7 +138,9 @@ if __name__ == '__main__':
         retrived_doc = db.similarity_search(question)[0].page_content
         print(retrived_doc)
         prompt_template = """
-        <s>[INST]{question}
+        <s>[INST]
+        
+        {question}
         Document:
         ```{document}```
         ​[/INST]
@@ -148,6 +150,10 @@ if __name__ == '__main__':
         chain = LLMChain(llm=llm, prompt=prompt)
 
         output = chain.predict(question=question, document=retrived_doc)
+
+        # maybe try this syntax?
+        # chain = prompt | llm
+        # output = chain.invoke({"question":question, "document":retrived_doc})
 
         he_output = sentencewise_translate(output,en_he_translate_pipe)
         print(he_output[::-1]) # print backward for readability
