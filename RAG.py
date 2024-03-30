@@ -2,11 +2,12 @@ from langchain.docstore.document import Document
 from langchain_community.vectorstores import FAISS
 from langchain.prompts import PromptTemplate
 from langchain.chains import LLMChain
-from file_utils import pdf_to_text, clean_and_split, temp_get_docs_for_plan
+from file_utils import pdf_to_text, clean_and_split, temp_get_docs_for_plan, pdf_bin_to_text
 from models import get_embedding_model, get_llm
 import pandas as pd
 from itertools import chain
 import os
+import re
 
 def diffrent_question_rephrasing(question):
     model = get_llm()
@@ -24,12 +25,13 @@ def diffrent_question_rephrasing(question):
     output_parser_list.append(question)
     return output_parser_list
 
-def get_top_k_by_count(questions, db, pl_number, k=3):
+def get_top_k_by_count(questions, db, pl_number=None, k=3):
     docs_counts = {}
     docs_scores = {}
     for q in questions:
         db_size = db.index.ntotal
-        docs = db.similarity_search_with_score(q, filter=dict(doc_id=pl_number), fetch_k=db_size, k=k)
+        doc_filter = dict(doc_id=pl_number) if pl_number else None
+        docs = db.similarity_search_with_score(q, filter=doc_filter, fetch_k=db_size, k=k)
 
         for doc,score in docs:
             if doc.page_content in docs_counts:
@@ -42,7 +44,6 @@ def get_top_k_by_count(questions, db, pl_number, k=3):
     sorted_docs = sorted(docs_counts.items(), key=lambda x: x[1], reverse=True)
     print("counts:", [val for key,val in sorted_docs])
     return [key for key,val in sorted_docs[:k]]
-
 
 def get_db(data,path):
     if(os.path.exists(path)):
@@ -64,6 +65,14 @@ def get_db(data,path):
     embeddings = get_embedding_model()
     db = FAISS.from_documents(documents, embeddings)
     db.save_local(path)
+    return db
+
+def create_db(file):
+    documents = []
+    text = pdf_bin_to_text(file)
+    documents.extend(clean_and_split(text, file))
+    embeddings = get_embedding_model()
+    db = FAISS.from_documents(documents, embeddings)
     return db
 
 def get_answer(question,chunks):

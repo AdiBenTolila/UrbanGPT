@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Document Chat UI</title>
+<style>
+    body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 0;
+    }
+    .chat-container {
+        width: 100%;
+        max-width: 600px;
+        margin: 0 auto;
+        padding: 20px;
+        padding-bottom: 100px; /* Adjust padding to accommodate the question bar */
+    }
+    .chat-box {
+        background-color: #f0f0f0;
+        padding: 10px;
+        border-radius: 5px;
+        margin-bottom: 10px;
+    }
+    .user-message {
+        background-color: #007bff;
+        color: #fff;
+        text-align: right;
+    }
+    .bot-message {
+        background-color: #28a745;
+        color: #fff;
+    }
+    .source-message {
+        background-color: #ffc107;
+        color: #000;
+    }
+    .message-input {
+        width: calc(100% - 20px);
+        padding: 10px;
+        border: none;
+        border-radius: 5px;
+        margin-top: 10px;
+    }
+    .message-input-container {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        background-color: #f9f9f9;
+        padding: 10px;
+        box-shadow: 0px -1px 10px rgba(0, 0, 0, 0.1);
+    }
+
+    .upload-input {
+        margin-top: 10px;
+    }
+    .upload-btn {
+        padding: 10px 15px;
+        background-color: #007bff;
+        color: #fff;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+    }
+    .loader {
+        border: 6px solid #f3f3f3;
+        border-radius: 50%;
+        border-top: 6px solid #3498db;
+        width: 40px;
+        height: 40px;
+        animation: spin 2s linear infinite;
+        display: none;
+        margin: 10px auto;
+    }
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+</style>
+</head>
+<body>
+
+<div class="chat-container">
+    <div class="chat-box bot-message">Welcome to the document chat! Upload a document to get started.</div>
+    <!-- <input type="file" id="fileUpload" class="upload-input" accept=".txt, .pdf, .doc, .docx"> -->
+    <!-- <button id="uploadBtn" class="upload-btn">Upload Document</button> -->
+    <!-- <input type="text" id="messageInput" class="message-input" placeholder="Ask a question..."> -->
+    <div class="loader" id="loader"></div>
+</div>
+<div class="message-input-container">
+    <input type="text" id="messageInput" class="message-input" placeholder="Ask a question...">
+    <input type="file" id="fileUpload" class="upload-input" accept=".txt, .pdf, .doc, .docx">
+    <button id="uploadBtn" class="upload-btn">Upload Document</button>
+</div>
+
+<script>
+    const fileUpload = document.getElementById('fileUpload');
+    const uploadBtn = document.getElementById('uploadBtn');
+    const messageInput = document.getElementById('messageInput');
+    const loader = document.getElementById('loader');
+    const chatContainer = document.querySelector('.chat-container');
+
+    uploadBtn.addEventListener('click', function() {
+        fileUpload.click();
+    });
+
+    fileUpload.addEventListener('change', function() {
+        const file = fileUpload.files[0];
+        if (file) {
+            const formData = new FormData();
+            formData.append('file', file);
+            loader.style.display = 'block'; // Show loader
+            fetch('/upload', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                displayBotMessage(data.message);
+                loader.style.display = 'none'; // Hide loader on response
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                loader.style.display = 'none'; // Hide loader on error
+            });
+        }
+    });
+
+    messageInput.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            const message = messageInput.value.trim();
+            if (message !== '') {
+                displayUserMessage(message);
+                fetch('/ask', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ question: message })
+                })
+                .then(response => response.json())
+                .then(data => displayBotMessage(data.message, data.sources))
+                .catch(error => console.error('Error:', error));
+                messageInput.value = '';
+            }
+        }
+    });
+
+    function displayUserMessage(message) {
+        const userMessage = document.createElement('div');
+        userMessage.className = 'chat-box user-message';
+        userMessage.textContent = message;
+        chatContainer.appendChild(userMessage);
+    }
+
+    function displayBotMessage(message,sources) {
+        console.log(sources);
+        if (sources) {
+            for (let i = 0; i < sources.length; i++) {
+                const sourceMessage = document.createElement('div');
+                sourceMessage.className = 'chat-box source-message';
+                sourceMessage.textContent = sources[i];
+                chatContainer.appendChild(sourceMessage);
+            }
+        }
+        const botMessage = document.createElement('div');
+        botMessage.className = 'chat-box bot-message';
+        botMessage.textContent = message;
+        chatContainer.appendChild(botMessage);
+    }
+</script>
+
+</body>
+</html>

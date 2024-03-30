@@ -41,8 +41,6 @@ def temp_get_docs_for_plan(plan_number):
         if "הוראות" in file:
             yield f"out/{plan_number}/{file}"
 
-
-
 def get_docs_for_plan_selenum(plan_number,redownload=False,retry=3):
     pwd = os.getcwd()
     xplan_number = extract_xplan_number(plan_number)
@@ -101,9 +99,16 @@ def pdf_to_text(filename):
     #     text = textract.process(filename, method='tesseract', language='eng')
     return text
 
+def pdf_bin_to_text(pdf_bin):
+    pdfReader = PdfReader(pdf_bin)
+    text = ""
+    for page in pdfReader.pages:
+        text += page.extract_text()
+    return text
+
 def clean_and_split(text, doc_id=None):
     # # Define the pattern for the unwanted text
-    unwanted_pattern = r'\nתכנון זמין\s+[0-9]\s+מונה\s+הדפסה'
+    unwanted_pattern = r'תכנון זמין\s+[0-9]+\s+מונה\s+הדפסה'
     cleaned_text = re.sub(unwanted_pattern, '', text)
 
     # # Use re.split to split the text based on the unwanted pattern
@@ -117,8 +122,8 @@ def clean_and_split(text, doc_id=None):
 
     text_splitter = RecursiveCharacterTextSplitter(
         separators=["\n\n", "\n","."," ",""],
-        chunk_size=300,
-        chunk_overlap=50,
+        chunk_size=2048,
+        chunk_overlap=128,
         length_function=len,
         is_separator_regex=False,
     )
