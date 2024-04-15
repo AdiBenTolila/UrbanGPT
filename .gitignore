@@ -3,4 +3,3 @@ models/
 cacheModels/
 __pycache__/
 .env/
-*.ipynb

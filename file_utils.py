@@ -106,7 +106,7 @@ def pdf_bin_to_text(pdf_bin):
         text += page.extract_text()
     return text
 
-def clean_and_split(text, doc_id=None):
+def clean_and_split(text, doc_id=None, chunk_size=2048, chunk_overlap=128):
     # # Define the pattern for the unwanted text
     unwanted_pattern = r'תכנון זמין\s+[0-9]+\s+מונה\s+הדפסה'
     cleaned_text = re.sub(unwanted_pattern, '', text)
@@ -122,8 +122,8 @@ def clean_and_split(text, doc_id=None):
 
     text_splitter = RecursiveCharacterTextSplitter(
         separators=["\n\n", "\n","."," ",""],
-        chunk_size=2048,
-        chunk_overlap=128,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
         length_function=len,
         is_separator_regex=False,
     )
