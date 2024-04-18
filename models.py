@@ -19,11 +19,13 @@ from langchain_core.callbacks import (
     CallbackManagerForLLMRun,
 )
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
+from langchain_core.messages import HumanMessage
 from langchain_cohere import ChatCohere
+from langchain_cohere.llms import Cohere
 import torch
 import time
 import dotenv
-dotenv.load_dotenv(".environment")
+dotenv.load_dotenv()
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # Define model names

@@ -111,15 +111,6 @@ def clean_and_split(text, doc_id=None, chunk_size=2048, chunk_overlap=128):
     unwanted_pattern = r'תכנון זמין\s+[0-9]+\s+מונה\s+הדפסה'
     cleaned_text = re.sub(unwanted_pattern, '', text)
 
-    # # Use re.split to split the text based on the unwanted pattern
-    # chunks = re.split(unwanted_pattern, text)
-
-    # # Remove empty lines in each chunk and filter out empty chunks
-    # chunks = [Document(page_content=re.sub(r'\n\s*\n', '\n', chunk).strip(),metadata={"source": "local"}) for chunk in chunks if chunk.strip()]
-
-    # print(cleaned_text)
-    # return chunks
-
     text_splitter = RecursiveCharacterTextSplitter(
         separators=["\n\n", "\n","."," ",""],
         chunk_size=chunk_size,
@@ -132,13 +123,6 @@ def clean_and_split(text, doc_id=None, chunk_size=2048, chunk_overlap=128):
         t.metadata = {"doc_id": doc_id}
 
     return texts
-
-    
-# def load_and_split(file):
-#     loader = PyPDFLoader(file)
-#     pages = loader.load_and_split()
-#     return pages
-
 
 def sentencewise_translate(text,translate_pipe):
     sentences = [t for t in text.split('.') if t]

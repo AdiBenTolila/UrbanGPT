@@ -83,57 +83,60 @@
 <body>
 
 <div class="chat-container">
-    <div class="chat-box bot-message">Welcome to the document chat! Upload a document to get started.</div>
-    <!-- <input type="file" id="fileUpload" class="upload-input" accept=".txt, .pdf, .doc, .docx"> -->
-    <!-- <button id="uploadBtn" class="upload-btn">Upload Document</button> -->
-    <!-- <input type="text" id="messageInput" class="message-input" placeholder="Ask a question..."> -->
+    <div class="chat-box bot-message">Welcome to the document chat! Select a document to get started.</div>
     <div class="loader" id="loader"></div>
 </div>
 <div class="message-input-container">
     <input type="text" id="messageInput" class="message-input" placeholder="Ask a question...">
-    <input type="file" id="fileUpload" class="upload-input" accept=".txt, .pdf, .doc, .docx">
-    <button id="uploadBtn" class="upload-btn">Upload Document</button>
+    <!-- select doc from list-->
+    <select id="docSelect" class="select-doc-input">
+        <option>Select a document</option disabled>
+    </select>
 </div>
 
 <script>
-    const fileUpload = document.getElementById('fileUpload');
-    const uploadBtn = document.getElementById('uploadBtn');
+    const selectDoc = document.getElementById('docSelect');
     const messageInput = document.getElementById('messageInput');
     const loader = document.getElementById('loader');
     const chatContainer = document.querySelector('.chat-container');
+    var selectedDoc = undefined;
 
-    uploadBtn.addEventListener('click', function() {
-        fileUpload.click();
-    });
-
-    fileUpload.addEventListener('change', function() {
-        const file = fileUpload.files[0];
-        if (file) {
-            const formData = new FormData();
-            formData.append('file', file);
-            loader.style.display = 'block'; // Show loader
-            fetch('/upload', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                displayBotMessage(data.message);
-                loader.style.display = 'none'; // Hide loader on response
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                loader.style.display = 'none'; // Hide loader on error
-            });
+    fetch('/available_plans', {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json'
         }
+    }).then(response => response.json())
+    .then(data => {
+    console.log(data);
+    data.forEach(doc => {
+        const option = document.createElement('option');
+        option.value = doc;
+        option.textContent = doc;
+        selectDoc.appendChild(option);
     });
+})
+    .catch(error => console.error('Error:', error));
+
+    selectDoc.addEventListener('change', function() {
+    if (selectDoc.value !== 'Select a document') {
+        if (selectedDoc !== selectDoc.value) {
+            selectedDoc = selectDoc.value;
+            chatContainer.innerHTML = ''; // Clear chat
+            const userMessage = document.createElement('div');
+            userMessage.className = 'chat-box user-message';
+            userMessage.textContent = `Selected document: ${selectDoc.value}`;
+            chatContainer.appendChild(userMessage);
+        }
+    }
+});
 
     messageInput.addEventListener('keypress', function(e) {
         if (e.key === 'Enter') {
             const message = messageInput.value.trim();
             if (message !== '') {
                 displayUserMessage(message);
-                fetch('/ask', {
+                fetch(`/ask/${selectedDoc}`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
