@@ -1,8 +1,7 @@
 from langchain.docstore.document import Document
 from langchain_community.vectorstores import FAISS
 from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain
-from file_utils import pdf_to_text, clean_and_split, temp_get_docs_for_plan, pdf_bin_to_text
+from file_utils import pdf_to_text, clean_and_split, temp_get_docs_for_plan, pdf_bin_to_text, clean_text
 from models import get_embedding_model, get_llm
 import pandas as pd
 from itertools import chain
@@ -13,6 +12,8 @@ from multiprocessing import Pool
 import tqdm
 from langchain.retrievers.multi_query import MultiQueryRetriever
 import time
+from langchain_core.exceptions import OutputParserException
+from langchain_core.output_parsers import BaseOutputParser
 
 def diffrent_question_rephrasing(question, k=10, model=None):
     if k==0:
@@ -25,8 +26,8 @@ def diffrent_question_rephrasing(question, k=10, model=None):
     Assistent:
     """
     prompt = PromptTemplate.from_template(prompt_template)
-    rephrase_chain = LLMChain(llm=model, prompt=prompt)
-    output = rephrase_chain.predict(question=question, n=k)
+    rephrase_chain = prompt | model
+    output = rephrase_chain.invoke(dict(question=question, n=k)).content
     output_parser_list = output.split("\n")
     # remove line number
     output_parser_list = [re.sub(r"^\d+\.\s", "", line) for line in output_parser_list]
@@ -122,56 +123,62 @@ def create_db(file):
     db = FAISS.from_documents(documents, embeddings)
     return db
 
-def get_answer(question,chunks, model=None, binary_answer=True):
+def get_answer(question,chunks, model=None, instructions=None, parser=None):
+    if parser is None:
+        parser = TextualOutputParser()
     if len(chunks) == 0:
         return "No document found"
     sources_template = ""
     for i, chunk in enumerate(chunks):
         sources_template += f"קטע {i+1}:\n```{chunk}```\n"
-    answer_format_description = "תשובתך צריכה להסתיים באחת מהתשובות הבאות: כן, לא, אין ברשותי מספיק מידע." if binary_answer else ""
-    # the new text contain the first 3 of the retrived docs
+    # answer_format_description = "תשובתך צריכה להסתיים באחת מהתשובות הבאות: כן, לא, אין ברשותי מספיק מידע." if binary_answer else ""
+    # answer_format_description = "" if format_description is None else format_description
+    answer_format_description = parser.get_format_instructions()
+    prompt_message = "בהינתן מספר קטעים מתוך מסמך תכנון הבנייה ושאלה בנוגע לתוכנית שבמסמך, מצא את התשובה המדוייקת לשאלה על בסיס המסמך וענה עליה בקצרה ובמדויק." if instructions is None else instructions
+    # the new text contain the first 3 of the retrived docs 
     prompt_template = """
-    Human: בהינתן מספר קטעים מתוך מסמך תכנון הבנייה ושאלה בנוגע לתוכנית שבמסמך, מצא את התשובה המדוייקת לשאלה על בסיס המסמך וענה עליה בקצרה ובמדויק.
-    {answer_format}
-    שאלה:
-    {question}
+    Human: {prompt_message}
     קטעים:
     {sources}
+    שאלה:
+    {question}
+    {answer_format}
     Assistent:
     """
     prompt = PromptTemplate.from_template(prompt_template)
     if model is None:
         model = get_llm()
-    chain_llm = LLMChain(llm=model, prompt=prompt)
-    output = chain_llm.predict(question=question, sources=sources_template, answer_format=answer_format_description)
+    chain_llm = prompt | model | parser
+    output = chain_llm.invoke(dict(question=question, sources=sources_template, answer_format=answer_format_description, prompt_message=prompt_message))
     return output
-
-def get_answer_foreach_doc(question, db, data, num_docs=3, num_rephrasings=10, model=None, verbose=False, multiprocess=False):
+    
+def get_answer_foreach_doc(question, db, doc_ids, num_docs=3, num_rephrasings=10, model=None, verbose=False, multiprocess=False, parser=None, full_doc=False, instructions=None):    
     if model is None:
         model = get_llm()
-    questions = diffrent_question_rephrasing(question, k=num_rephrasings, model=model)
-    if verbose:
-        print(questions)
+    if full_doc:
+        docs_chunks = {doc_id:[clean_text(pdf_to_text(doc)) for doc in temp_get_docs_for_plan(doc_id)] for doc_id in doc_ids}
+    else:
+        questions = diffrent_question_rephrasing(question, k=num_rephrasings, model=model)
+        if verbose:
+            print(questions)
+        docs_counts = {k:{} for k in doc_ids}
+        docs_score_sum = {k:0 for k in doc_ids}
+        for q in questions:
+            res = db.similarity_search_with_score(q, k=db.index.ntotal, fetch_k=db.index.ntotal)
+            res_dict = {}
+            for doc, score in res:
+                if len(res_dict.get(doc.metadata['doc_id'], [])) < num_docs:
+                    if doc.metadata['doc_id'] in docs_counts.keys():
+                        res_dict[doc.metadata['doc_id']] = res_dict.get(doc.metadata['doc_id'], []) + [(doc, score)]
+                        docs_counts[doc.metadata['doc_id']][doc.page_content] = docs_counts[doc.metadata['doc_id']].get(doc.page_content, 0) + 1
+                        docs_score_sum[doc.metadata['doc_id']] += score
+        # sorted_docs_count = {doc_id:{chnk:cnt for chnk,cnt in sorted(count_dict.items(), key=lambda x:x[1], reverse=True)[:num_docs]} for doc_id,count_dict in docs_counts.items()}
+        docs_chunks = {doc_id:[chnk for chnk,cnt in sorted(count_dict.items(), key=lambda x:x[1], reverse=True)[:num_docs]] for doc_id,count_dict in docs_counts.items()}
     answers = []
-    
-    docs_counts = {k:{} for k in data['pl_number']}
-    docs_score_sum = {k:0 for k in data['pl_number']}
-    for q in questions:
-        res = db.similarity_search_with_score(q, k=db.index.ntotal, fetch_k=db.index.ntotal)
-        res_dict = {}
-        for doc, score in res:
-            if len(res_dict.get(doc.metadata['doc_id'], [])) < num_docs:
-                if doc.metadata['doc_id'] in docs_counts.keys():
-                    res_dict[doc.metadata['doc_id']] = res_dict.get(doc.metadata['doc_id'], []) + [(doc, score)]
-                    docs_counts[doc.metadata['doc_id']][doc.page_content] = docs_counts[doc.metadata['doc_id']].get(doc.page_content, 0) + 1
-                    docs_score_sum[doc.metadata['doc_id']] += score
-    # sorted_docs_count = {doc_id:{chnk:cnt for chnk,cnt in sorted(count_dict.items(), key=lambda x:x[1], reverse=True)[:num_docs]} for doc_id,count_dict in docs_counts.items()}
-    docs_chunks = {doc_id:[chnk for chnk,cnt in sorted(count_dict.items(), key=lambda x:x[1], reverse=True)[:num_docs]] for doc_id,count_dict in docs_counts.items()}
-    
     if multiprocess:
         pool = ThreadPool(multiprocess)
         def _get_answer(pl_num, question, chunks, model):
-            ans = get_answer(question, chunks, model)
+            ans = get_answer(question, chunks, model, parser=parser, instructions=instructions)
             if verbose:
                 print(pl_num, "done")
             return {
@@ -181,11 +188,11 @@ def get_answer_foreach_doc(question, db, data, num_docs=3, num_rephrasings=10, m
             }
         answers = pool.starmap(_get_answer, [(pl_num, question, chunks, model) for pl_num,chunks in docs_chunks.items()])
     else:
-        for i,pl_num in tqdm.tqdm(enumerate(data['pl_number'].values)):
+        for i,pl_num in tqdm.tqdm(enumerate(doc_ids), total=len(doc_ids)):
             # chunks = get_top_k_by_count(questions, db, row['pl_number'], k=num_docs)
             # chunks = list(sorted_docs_count[row['pl_number']].keys())
             chunks = docs_chunks[pl_num]
-            output = get_answer(question,chunks, model=model)
+            output = get_answer(question,chunks, model=model, parser=parser, instructions=instructions)
             answers.append({
                 "pl_number": pl_num,
                 "answer": output,
@@ -209,6 +216,73 @@ def multiquery_retriver(question, db):
     print("len_docs:",len(unique_docs))
 
     return unique_docs
+
+class BooleanOutputParser(BaseOutputParser[bool]):
+    """Boolean boolean parser."""
+
+    true_val: str = "כן"
+    false_val: str = "לא"
+    unknown_val: str = "אין ברשותי מספיק מידע"
+
+    def parse(self, text: str) -> bool:
+        # clean text and remove punctuation
+        cleaned_text = text.strip().lower()
+        cleaned_text = re.sub(r"[^\w\s]", "", cleaned_text)
+        
+        if cleaned_text not in (self.true_val.lower(), self.false_val.lower(), self.unknown_val.lower()):
+            raise OutputParserException(
+                f"BooleanOutputParser expected output value to either be "
+                f"{self.true_val}, {self.false_val}, or {self.unknown_val}, but "
+                f"Received {cleaned_text}."
+            )
+        return True if cleaned_text == self.true_val.lower() else False if cleaned_text == self.false_val.lower() else pd.NA
+
+    @property
+    def _type(self) -> str:
+        return "boolean_output_parser"
+    
+    def get_format_instructions(self):
+        return "תשובתך צריכה להיות בפורמט כזה: כן, לא או אין ברשותי מספיק מידע."
+
+punctuation = r"""!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~"""
+class NumericOutputParser(BaseOutputParser[int]):
+    """Numeric output parser."""
+
+    unknown_val = "אין ברשותי מספיק מידע"
+    def parse(self, text: str) -> int:
+        # clean text and remove punctuation
+        cleaned_text = text.strip()
+        cleaned_text = re.sub(rf"[{punctuation}]", "", cleaned_text)
+        
+        if self.unknown_val in cleaned_text:
+            return pd.NA
+        try:
+            return int(cleaned_text)
+        except ValueError:
+            raise OutputParserException(
+                f"NumericOutputParser expected output value to be an integer, but "
+                f"Received {cleaned_text}."
+            )
+
+    @property
+    def _type(self) -> str:
+        return "numeric_output_parser"
+    
+    def get_format_instructions(self):
+        return f"תשובתך צריכה להיות מספר שלם, אם אין מספיק מידע כדי לספק תשובה תשיב: \"{self.unknown_val}\" בלבד."
+
+class TextualOutputParser(BaseOutputParser[str]):
+    """Textual output parser."""
+
+    def parse(self, text: str) -> str:
+        return text
+
+    @property
+    def _type(self) -> str:
+        return "textual_output_parser"
+    
+    def get_format_instructions(self)->str:
+        return "תשובתך צריכה להכיל את התשובה הסופית לשאלה שנשאלה."
 
 if __name__ == '__main__':
     data = pd.read_csv('shpan.csv') # read the data

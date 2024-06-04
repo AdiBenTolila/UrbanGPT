@@ -106,10 +106,14 @@ def pdf_bin_to_text(pdf_bin):
         text += page.extract_text()
     return text
 
-def clean_and_split(text, doc_id=None, chunk_size=2048, chunk_overlap=128):
-    # # Define the pattern for the unwanted text
+def clean_text(text):
+    # Define the pattern for the unwanted text
     unwanted_pattern = r'תכנון זמין\s+[0-9]+\s+מונה\s+הדפסה'
     cleaned_text = re.sub(unwanted_pattern, '', text)
+    return cleaned_text
+
+def clean_and_split(text, doc_id=None, chunk_size=2048, chunk_overlap=128):
+    cleaned_text = clean_text(text)
 
     text_splitter = RecursiveCharacterTextSplitter(
         separators=["\n\n", "\n","."," ",""],
@@ -134,6 +138,12 @@ def sentencewise_translate(text,translate_pipe):
     translated_text = '.'.join(sentence_translations)
 
     return translated_text
+
+def get_text_for_plan(plan_number):
+    files_text = (pdf_to_text(doc) for doc in temp_get_docs_for_plan(plan_number))
+    files_cleand = [clean_text(text) for text in files_text]
+    docs_str = "\n".join(files_cleand)
+    return docs_str
 
 if __name__ == '__main__':
     data = pd.read_csv('shpan.csv')

@@ -8,6 +8,8 @@ from langchain_google_genai import (
     HarmBlockThreshold,
     HarmCategory,
 )
+from langchain_google_vertexai import ChatVertexAI
+
 import os
 from langchain_core.language_models.llms import LLM
 from langchain_core.language_models import BaseChatModel
@@ -29,8 +31,6 @@ dotenv.load_dotenv()
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # Define model names
-he_en_model_name = "Helsinki-NLP/opus-mt-tc-big-he-en"
-en_he_model_name = "Helsinki-NLP/opus-mt-en-he"
 # embedding_model = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 # embedding_model = "sentence-transformers/all-MiniLM-l6-v2"
 embedding_model_name = "sentence-transformers/LaBSE"
@@ -102,20 +102,6 @@ class RateLimitChat(BaseChatModel):
     def _identifying_params(self) -> Dict[str, Any]:
         return self.chat_model._identifying_params
 
-    
-
-# # Create tokenizer and model instances
-# he_en_tokenizer = AutoTokenizer.from_pretrained(he_en_model_name,cache_dir="cacheModels")
-# he_en_model = AutoModelForSeq2SeqLM.from_pretrained(he_en_model_name, cache_dir="cacheModels")
-# # Create translation pipeline using the tokenizer and model
-# he_en_translate_pipe = pipeline("translation", model=he_en_model, tokenizer=he_en_tokenizer)
-
-# # Create tokenizer and model instances
-# en_he_tokenizer = AutoTokenizer.from_pretrained(en_he_model_name, cache_dir="cacheModels")
-# en_he_model = AutoModelForSeq2SeqLM.from_pretrained(en_he_model_name, cache_dir="cacheModels")
-# # Create translation pipeline using the tokenizer and model
-# en_he_translate_pipe = pipeline("translation", model=en_he_model, tokenizer=en_he_tokenizer)
-
 def get_translation_pipe(model_name):
     tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir="cacheModels")
     model = AutoModelForSeq2SeqLM.from_pretrained(model_name, cache_dir="cacheModels")
@@ -131,10 +117,18 @@ def get_embedding_model(model_name=embedding_model_name):
     )
 
 def get_gemini_llm(rate_limit=False):
-    assert "GOOGLE_API_KEY" in os.environ, "Please set the GOOGLE_API_KEY environment variable"
+    assert "GEMINI_API_KEY" in os.environ, "Please set the GEMINI_API_KEY environment variable"
     model = ChatGoogleGenerativeAI(model="gemini-pro", safety_settings={
             HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT: HarmBlockThreshold.BLOCK_NONE,
-        })
+        }, google_api_key=os.environ["GEMINI_API_KEY"])
+    if rate_limit:
+        return RateLimitChat(model, rate_limit=rate_limit)
+    else:
+        return model
+    
+def get_vertex_llm(rate_limit=False):
+    assert "GOOGLE_API_KEY" in os.environ, "Please set the GOOGLE_API_KEY environment variable"
+    model = ChatVertexAI(model="gemini-1.5-pro")
     if rate_limit:
         return RateLimitChat(model, rate_limit=rate_limit)
     else:
