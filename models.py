@@ -3,6 +3,7 @@ from transformers import AutoTokenizer, AutoModelForSeq2SeqLM, pipeline
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.llms import LlamaCpp
 from langchain_community.llms import Bedrock
+from langchain_aws import ChatBedrock
 from langchain_google_genai import (
     ChatGoogleGenerativeAI,
     HarmBlockThreshold,
@@ -135,7 +136,8 @@ def get_vertex_llm(rate_limit=False):
         return model
 
 def get_claude_llm():
-    return Bedrock(model_id="anthropic.claude-instant-v1")
+    # return Bedrock(model_id="anthropic.claude-instant-v1")
+    return ChatBedrock(model_id="anthropic.claude-instant-v1")
 
 def get_mistral_llm():
     return LlamaCpp(

@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -24,16 +25,17 @@
         margin-bottom: 10px;
     }
     .user-message {
-        background-color: #007bff;
-        color: #fff;
+        /* background-color: #007bff; */
+        color: #000;
         text-align: right;
     }
     .bot-message {
-        background-color: #28a745;
-        color: #fff;
+        /* background-color: #28a745; */
+        /* margin: auto; */
+        color: #000;
     }
     .source-message {
-        background-color: #ffc107;
+        background-color: #c3c3c3;
         color: #000;
     }
     .message-input {
@@ -51,6 +53,8 @@
         background-color: #f9f9f9;
         padding: 10px;
         box-shadow: 0px -1px 10px rgba(0, 0, 0, 0.1);
+        display: flex;
+        margin-right: 15px;
     }
 
     .upload-input {
@@ -83,14 +87,20 @@
 <body>
 
 <div class="chat-container">
-    <div class="chat-box bot-message">Welcome to the document chat! Select a document to get started.</div>
-    <div class="loader" id="loader"></div>
+    <div class="chat-box bot-message">
+    <table>
+        <tr>
+            <td><img src="static/bot_icon.png" style="margin-right: 8px; border-radius: 50%; width: 40px;"></td>
+            <td>Welcome to the document chat! Select a document to get started.</td>
+        </tr>
+    </table>
+    </div>
 </div>
 <div class="message-input-container">
-    <input type="text" id="messageInput" class="message-input" placeholder="Ask a question...">
+    <input type="text" id="messageInput" class="message-input" style="margin-right: 5px"  placeholder="Ask a question...">
     <!-- select doc from list-->
-    <select id="docSelect" class="select-doc-input">
-        <option>Select a document</option disabled>
+    <select id="docSelect" class="select-doc-input" style="margin-right: 15px">
+        <option>Select a document</option>
     </select>
 </div>
 
@@ -108,44 +118,57 @@
         }
     }).then(response => response.json())
     .then(data => {
-    console.log(data);
-    data.forEach(doc => {
-        const option = document.createElement('option');
-        option.value = doc;
-        option.textContent = doc;
-        selectDoc.appendChild(option);
-    });
-})
+        console.log(data);
+        data.forEach(doc => {
+            const option = document.createElement('option');
+            option.value = doc;
+            option.textContent = doc;
+            selectDoc.appendChild(option);
+        });
+    })
     .catch(error => console.error('Error:', error));
 
     selectDoc.addEventListener('change', function() {
-    if (selectDoc.value !== 'Select a document') {
-        if (selectedDoc !== selectDoc.value) {
-            selectedDoc = selectDoc.value;
-            chatContainer.innerHTML = ''; // Clear chat
-            const userMessage = document.createElement('div');
-            userMessage.className = 'chat-box user-message';
-            userMessage.textContent = `Selected document: ${selectDoc.value}`;
-            chatContainer.appendChild(userMessage);
+        if (selectDoc.value !== 'Select a document') {
+            if (selectedDoc !== selectDoc.value) {
+                selectedDoc = selectDoc.value;
+                // chatContainer.innerHTML = ''; // Clear chat
+                const userMessage = document.createElement('div');
+                userMessage.className = 'chat-box user-message';
+                userMessage.innerHTML = `<table  style="display:inline"><tr><td><span>Selected document: ${selectedDoc}</span></td><td><img src="static/user-icon.jpg" style="margin-left: 8px; border-radius: 50%; width: 40px;"></td></tr></table>`;
+                chatContainer.appendChild(userMessage);
+            }
         }
-    }
-});
+    });
 
     messageInput.addEventListener('keypress', function(e) {
         if (e.key === 'Enter') {
             const message = messageInput.value.trim();
             if (message !== '') {
                 displayUserMessage(message);
-                fetch(`/ask/${selectedDoc}`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ question: message })
-                })
-                .then(response => response.json())
-                .then(data => displayBotMessage(data.message, data.sources))
-                .catch(error => console.error('Error:', error));
+                if (selectDoc.value === 'Select a document') {
+                    fetch('/ask_general', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ question: message })
+                    })
+                    .then(response => response.json())
+                    .then(data => displayResTable(data.columns, data.data))
+                    .catch(error => console.error('Error:', error));
+                } else {
+                    fetch(`/ask/${selectedDoc}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ question: message })
+                    })
+                    .then(response => response.json())
+                    .then(data => displayBotMessage(data.message, data.sources))
+                    .catch(error => console.error('Error:', error));
+                }
                 messageInput.value = '';
             }
         }
@@ -154,26 +177,52 @@
     function displayUserMessage(message) {
         const userMessage = document.createElement('div');
         userMessage.className = 'chat-box user-message';
-        userMessage.textContent = message;
+        // userMessage.textContent = message;
+        userMessage.innerHTML = `<table  style="display:inline"><tr><td><span>${message}</span></td><td><img src="static/user-icon.jpg" style="margin-left: 8px; border-radius: 50%; width: 40px;"></td></tr></table>`;
+        // <span>${message}</span><img src="static/user-icon.jpg" style="margin-left: 8px; border-radius: 50%; width: 40px;">`;
         chatContainer.appendChild(userMessage);
     }
 
-    function displayBotMessage(message,sources) {
+    function displayBotMessage(message, sources) {
         console.log(sources);
         if (sources) {
             for (let i = 0; i < sources.length; i++) {
                 const sourceMessage = document.createElement('div');
                 sourceMessage.className = 'chat-box source-message';
-                sourceMessage.textContent = sources[i];
+                sourceMessage.innerHTML = `<table  style="display:inline"><tr><td><img src="static/source_icon.png" style="margin-right: 8px; border-radius: 50%; width: 40px;"></td><td><span>${sources[i]}</span></td></tr></table>`;
                 chatContainer.appendChild(sourceMessage);
             }
         }
         const botMessage = document.createElement('div');
         botMessage.className = 'chat-box bot-message';
-        botMessage.textContent = message;
+        botMessage.innerHTML = `<table  style="display:inline"><tr><td><img src="static/bot_icon.png" style="margin-right: 8px; border-radius: 50%; width: 40px;"></td><td><span>${message}</span></td></tr></table>`;
+        chatContainer.appendChild(botMessage);
+    }
+    function displayResTable(cols, data){
+        var table = document.createElement('table');
+        var tr = table.insertRow(-1);
+        for (var i = 0; i < cols.length; i++) {
+            var th = document.createElement('th');
+            th.innerHTML = cols[i];
+            tr.appendChild(th);
+        }
+        for (var i = 0; i < data.length; i++) {
+            tr = table.insertRow(-1);
+            for (var j = 0; j < cols.length; j++) {
+                var tabCell = tr.insertCell(-1);
+                tabCell.innerHTML = data[i][cols[j]];
+            }
+        }
+        const botMessage = document.createElement('div');
+        botMessage.className = 'chat-box bot-message';
+        // add table to bot message and add icon
+
+        botMessage.innerHTML = `<table  style="display:inline"><tr><td><img src="static/bot_icon.png" style="margin-right: 8px; border-radius: 50%; width: 40px;"></td><td><span>Here is the results:</span></td></tr></table>`;
+        botMessage.appendChild(table);
         chatContainer.appendChild(botMessage);
     }
 </script>
 
 </body>
 </html>
+

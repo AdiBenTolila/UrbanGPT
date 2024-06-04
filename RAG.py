@@ -217,6 +217,27 @@ def multiquery_retriver(question, db):
 
     return unique_docs
 
+def get_answers_for_all_docs_return_them(question):
+    question_individual = """ :"בהינתן שאלה הנשאלת ברבים תהפוך אותה שאלה ליחיד והשאלה חייבת להתחיל ב- "האם"""
+    llm_model = get_llm()
+    prompt_template = """
+    Human: {question_individual}
+    {question}
+    Assistent:
+    """
+    # chain_llm = LLMChain(llm=llm_model, prompt=PromptTemplate.from_template(prompt_template))
+    chain_llm = PromptTemplate.from_template(prompt_template) | llm_model
+    output = chain_llm.invoke(dict(question=question, question_individual=question_individual))
+    print("output:",output[::-1])
+    return output[::-1]
+    # if model is None:
+    #     model = get_llm()
+    # answers = get_answer_foreach_doc(question, db, data, num_docs=num_docs, num_rephrasings=num_rephrasings, model=model, verbose=verbose, multiprocess=multiprocess)
+    # yes_answers = [ans for ans in answers if "כן" in ans["answer"]]
+    # print("yes_answers:",yes_answers)
+    # return answers
+
+
 class BooleanOutputParser(BaseOutputParser[bool]):
     """Boolean boolean parser."""
 
@@ -293,8 +314,9 @@ if __name__ == '__main__':
     # else:
     #     df = pd.DataFrame(columns=['pl_number','answer','chunks'])
     count = 0
-
-    question = "האם הבניה המתוכננת היא ברחוב אורוגוואי?"
+    question = get_answers_for_all_docs_return_them("מהן הבניות המתוכננות ברחוב אורוגוואי?")
+    # exit()
+    # question = "האם הבניה המתוכננת היא ברחוב אורוגוואי?"
     questions = diffrent_question_rephrasing(question)
     print(questions)
     chunks_for_docs={}
