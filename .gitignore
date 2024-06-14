@@ -3,3 +3,7 @@ models/
 cacheModels/
 __pycache__/
 .env/
+*.csv
+.*
+*.db
+faiss_index/

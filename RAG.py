@@ -14,6 +14,9 @@ from langchain.retrievers.multi_query import MultiQueryRetriever
 import time
 from langchain_core.exceptions import OutputParserException
 from langchain_core.output_parsers import BaseOutputParser
+from datetime import datetime
+import logging
+logger = logging.getLogger(__name__)
 
 def diffrent_question_rephrasing(question, k=10, model=None):
     if k==0:
@@ -33,6 +36,19 @@ def diffrent_question_rephrasing(question, k=10, model=None):
     output_parser_list = [re.sub(r"^\d+\.\s", "", line) for line in output_parser_list]
     output_parser_list.append(question)
     return output_parser_list
+
+def question_from_description(description, model=None):
+    if model is None:
+        model = get_llm()
+    prompt_template = """
+    Human: בהינתן תיאור השדה הבא, נסח שאלה שתישאל על כל מסמך בכדי לקבל את המידע הרלוונטי לשדה זה.
+    תיאור: " {description} "
+    Assistent:
+    """
+    prompt = PromptTemplate.from_template(prompt_template)
+    question_chain = prompt | model
+    output = question_chain.invoke(dict(description=description)).content
+    return output
 
 def get_top_k_by_count(questions, db, pl_number=None, k=3, verbose=False):
     docs_counts = {}
@@ -127,7 +143,9 @@ def get_answer(question,chunks, model=None, instructions=None, parser=None):
     if parser is None:
         parser = TextualOutputParser()
     if len(chunks) == 0:
-        return "No document found"
+        # return "No document found"
+        logger.info(f"document not found for question: {question}")
+        return None
     sources_template = ""
     for i, chunk in enumerate(chunks):
         sources_template += f"קטע {i+1}:\n```{chunk}```\n"
@@ -152,7 +170,7 @@ def get_answer(question,chunks, model=None, instructions=None, parser=None):
     output = chain_llm.invoke(dict(question=question, sources=sources_template, answer_format=answer_format_description, prompt_message=prompt_message))
     return output
     
-def get_answer_foreach_doc(question, db, doc_ids, num_docs=3, num_rephrasings=10, model=None, verbose=False, multiprocess=False, parser=None, full_doc=False, instructions=None):    
+def get_answer_foreach_doc(question, db, doc_ids, num_docs=3, num_rephrasings=0, model=None, verbose=False, multiprocess=False, parser=None, full_doc=False, instructions=None):
     if model is None:
         model = get_llm()
     if full_doc:
@@ -198,6 +216,7 @@ def get_answer_foreach_doc(question, db, doc_ids, num_docs=3, num_rephrasings=10
                 "answer": output,
                 "chunks": chunks
             })
+            logger.info(f"{pl_num} answer:{output}")
             if verbose:
                 print(f"{i}s document:",output)
     return answers
@@ -256,7 +275,7 @@ class BooleanOutputParser(BaseOutputParser[bool]):
                 f"{self.true_val}, {self.false_val}, or {self.unknown_val}, but "
                 f"Received {cleaned_text}."
             )
-        return True if cleaned_text == self.true_val.lower() else False if cleaned_text == self.false_val.lower() else pd.NA
+        return True if cleaned_text == self.true_val.lower() else False if cleaned_text == self.false_val.lower() else None
 
     @property
     def _type(self) -> str:
@@ -264,6 +283,9 @@ class BooleanOutputParser(BaseOutputParser[bool]):
     
     def get_format_instructions(self):
         return "תשובתך צריכה להיות בפורמט כזה: כן, לא או אין ברשותי מספיק מידע."
+    
+    def get_type(self):
+        return 'BOOLEAN'
 
 punctuation = r"""!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~"""
 class NumericOutputParser(BaseOutputParser[int]):
@@ -273,10 +295,10 @@ class NumericOutputParser(BaseOutputParser[int]):
     def parse(self, text: str) -> int:
         # clean text and remove punctuation
         cleaned_text = text.strip()
-        cleaned_text = re.sub(rf"[{punctuation}]", "", cleaned_text)
+        # cleaned_text = re.sub(rf"[{punctuation}]", "", cleaned_text)
         
         if self.unknown_val in cleaned_text:
-            return pd.NA
+            return None
         try:
             return int(cleaned_text)
         except ValueError:
@@ -291,11 +313,17 @@ class NumericOutputParser(BaseOutputParser[int]):
     
     def get_format_instructions(self):
         return f"תשובתך צריכה להיות מספר שלם, אם אין מספיק מידע כדי לספק תשובה תשיב: \"{self.unknown_val}\" בלבד."
+    
+    def get_type(self):
+        return 'INTEGER'
 
 class TextualOutputParser(BaseOutputParser[str]):
     """Textual output parser."""
 
+    unknown_val = "אין ברשותי מספיק מידע"
     def parse(self, text: str) -> str:
+        if self.unknown_val in text:
+            return None
         return text
 
     @property
@@ -303,7 +331,36 @@ class TextualOutputParser(BaseOutputParser[str]):
         return "textual_output_parser"
     
     def get_format_instructions(self)->str:
-        return "תשובתך צריכה להכיל את התשובה הסופית לשאלה שנשאלה."
+        return f"תשובתך צריכה להכיל את התשובה הסופית לשאלה שנשאלה, אם אין מספיק מידע כדי לספק תשובה תשיב: \"{self.unknown_val}\" בלבד."
+    
+    def get_type(self):
+        return 'TEXT'
+
+class DateOutputParser(BaseOutputParser[str]):
+    """Date output parser."""
+
+    unknown_val = "אין ברשותי מספיק מידע"
+    def parse(self, text: str) -> str:
+        if self.unknown_val in text:
+            return None
+        try:
+            date = datetime.strptime(text, '%d/%m/%Y')
+            return date
+        except ValueError:
+            raise OutputParserException(
+                f"DateOutputParser expected output value to be a date, but "
+                f"Received {text}."
+            ) 
+    
+    @property
+    def _type(self) -> str:
+        return "date_output_parser"
+    
+    def get_format_instructions(self):
+        return f"תשובתך צריכה להיות תאריך בפורמט: יום/חודש/שנה, אם אין מספיק מידע כדי לספק תשובה תשיב: \"{self.unknown_val}\" בלבד."
+
+    def get_type(self):
+        return 'DATE'
 
 if __name__ == '__main__':
     data = pd.read_csv('shpan.csv') # read the data

@@ -10,7 +10,7 @@ from langchain_google_genai import (
     HarmCategory,
 )
 from langchain_google_vertexai import ChatVertexAI
-
+from langchain_openai import ChatOpenAI
 import os
 from langchain_core.language_models.llms import LLM
 from langchain_core.language_models import BaseChatModel
@@ -23,8 +23,11 @@ from langchain_core.callbacks import (
 )
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langchain_core.messages import HumanMessage
-from langchain_cohere import ChatCohere
-from langchain_cohere.llms import Cohere
+# from langchain_cohere import ChatCohere
+# from langchain_cohere.llms import Cohere
+from langchain_huggingface import HuggingFacePipeline, ChatHuggingFace
+from transformers import BitsAndBytesConfig
+
 import torch
 import time
 import dotenv
@@ -139,15 +142,41 @@ def get_claude_llm():
     # return Bedrock(model_id="anthropic.claude-instant-v1")
     return ChatBedrock(model_id="anthropic.claude-instant-v1")
 
-def get_mistral_llm():
+def get_llamaCpp_llm(model_name, ):
     return LlamaCpp(
-        model_path="models/mistral-7b-instruct-v0.1.Q4_K_M.gguf",
+        model_path=model_name,
         temperature=0.0,
         max_tokens=1024,
         top_p=1,
         n_ctx=8192,  # Reduce the context size
         verbose=True,
     )
+
+def get_huggingface_llm(model_name):
+    quantization_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_compute_dtype="float16",
+        bnb_4bit_use_double_quant=True
+    )
+    llm = HuggingFacePipeline.from_model_id(
+            model_id=model_name,
+            task="text-generation",
+            pipeline_kwargs=dict(
+                max_new_tokens=512,
+                repetition_penalty=1.03,
+            ),
+            # model_kwargs={"quantization_config": quantization_config},
+        )
+    chat_model = ChatHuggingFace(llm=llm)
+    return chat_model
+
+def get_openai_llm():
+    assert "OPENAI_API_KEY" in os.environ, "Please set the OPENAI_API_KEY environment variable"
+    return ChatOpenAI(model_name="gpt4o")
+
+def get_mistral_llm():
+    return get_llamaCpp_llm("dicta-il/dictalm2.0-instruct-GGUF")
 
 def get_commandR_llm(rate_limit=False):
     assert "COHERE_API_KEY" in os.environ, "Please set the COHERE_API_KEY environment variable"
@@ -159,7 +188,8 @@ def get_llm():
     return get_gemini_llm()
 
 if __name__ == '__main__':
-    llm = get_llm()
+    llm = get_huggingface_llm("Qwen/Qwen2-1.5B-Instruct")
+    # llm = get_llamaCpp_llm("models/dictalm2.0-instruct.Q4_K_M.gguf")
     # stream llm query
     for chunk in llm.stream("תכתוב לנו שיר על המרצה אסף הגדול מכולם."):
         print(chunk.content, end="", flush=True)
