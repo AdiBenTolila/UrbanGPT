@@ -1,4 +1,6 @@
 out/
+logs/
+test/
 models/
 cacheModels/
 __pycache__/

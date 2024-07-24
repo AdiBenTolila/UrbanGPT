@@ -1,228 +1,94 @@
-
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" dir="rtl">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Document Chat UI</title>
-<style>
-    body {
-        font-family: Arial, sans-serif;
-        margin: 0;
-        padding: 0;
-    }
-    .chat-container {
-        width: 100%;
-        max-width: 600px;
-        margin: 0 auto;
-        padding: 20px;
-        padding-bottom: 100px; /* Adjust padding to accommodate the question bar */
-    }
-    .chat-box {
-        background-color: #f0f0f0;
-        padding: 10px;
-        border-radius: 5px;
-        margin-bottom: 10px;
-    }
-    .user-message {
-        /* background-color: #007bff; */
-        color: #000;
-        text-align: right;
-    }
-    .bot-message {
-        /* background-color: #28a745; */
-        /* margin: auto; */
-        color: #000;
-    }
-    .source-message {
-        background-color: #c3c3c3;
-        color: #000;
-    }
-    .message-input {
-        width: calc(100% - 20px);
-        padding: 10px;
-        border: none;
-        border-radius: 5px;
-        margin-top: 10px;
-    }
-    .message-input-container {
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        width: 100%;
-        background-color: #f9f9f9;
-        padding: 10px;
-        box-shadow: 0px -1px 10px rgba(0, 0, 0, 0.1);
-        display: flex;
-        margin-right: 15px;
-    }
-
-    .upload-input {
-        margin-top: 10px;
-    }
-    .upload-btn {
-        padding: 10px 15px;
-        background-color: #007bff;
-        color: #fff;
-        border: none;
-        border-radius: 5px;
-        cursor: pointer;
-    }
-    .loader {
-        border: 6px solid #f3f3f3;
-        border-radius: 50%;
-        border-top: 6px solid #3498db;
-        width: 40px;
-        height: 40px;
-        animation: spin 2s linear infinite;
-        display: none;
-        margin: 10px auto;
-    }
-    @keyframes spin {
-        0% { transform: rotate(0deg); }
-        100% { transform: rotate(360deg); }
-    }
-</style>
+<title>UrbanGPT</title>
+<link rel="stylesheet" href="static/style.css">
+<script src="static/script.js" defer></script>
 </head>
-<body>
+<body onload="onLoad()">
+    <header>
+        <nav class="navbar">
+            <div class="navbar-container">
+                <div class="navbar-logo">
+                    <img src="static/logo.png" alt="Logo" class="navbar-logo-img">
+                </div>
+                <ul class="navbar-menu">
+                    <li class="navbar-item"><a href="#home" class="navbar-link" data-section="chat-section">בית</a></li>
+                    <li class="navbar-item"><a href="#about" class="navbar-link" data-section="about-section">על הפרוייקט</a></li>
+                    <li class="navbar-item"><a href="#contact" class="navbar-link" data-section="contact-section">צור קשר</a></li>
+                </ul>
+            </div>
+        </nav>
+    </header>
+    <div id="chat-section" class="content-section active">
+        <div class="sidebar">
+            <div>
+                <button id="newChatBtn">צ'אט חדש</button>
+                <button id="editSettingBtn">הגדרות</button>
+                <button id="clearDataBtn">נקה נתונים</button>
+            </div>
+            <div class="chat-mode">
+                <label>בחר סוג צ'אט:</label>
+                <ul id="chatModeList">
+                    <li data-mode="agent" class="active">סוכן</li>
+                    <li data-mode="document">מסמך</li>
+                    <li data-mode="foreach_document">כל המסמכים</li>
+                    <!-- Add more modes as needed -->
+                </ul>
+            </div>
+            <div class="previous-chats">
+                <h3>צ'אטים קודמים</h3>
+                <ul id="chatList">
+                    <!-- Previous chats will be dynamically added here -->
+                </ul>
+            </div>
+        </div>
+        
+        <!-- Modal for Settings -->
+        <div id="settingsModal" class="modal">
+            <div class="modal-content">
+                <span class="close">&times;</span>
+                <h2>הגדרות</h2>
+                <label for="systemMessage">הודעת מערכת:</label>
+                <textarea id="systemMessage" rows="4"></textarea>
+                <label for="modelName">מודל:</label>
+                <select id="modelName">
+                </select>
+                <label for="numRetrievalDocs">מספר צ'אנקים למסמך:</label>
+                <input type="number" id="numRetrievalDocs" min="1" max="10">
+                <!-- Placeholder for additional settings fields -->
+                <button id="saveSettingsBtn">שמור</button>
+            </div>
+        </div>
 
-<div class="chat-container">
-    <div class="chat-box bot-message">
-    <table>
-        <tr>
-            <td><img src="static/bot_icon.png" style="margin-right: 8px; border-radius: 50%; width: 40px;"></td>
-            <td>Welcome to the document chat! Select a document to get started.</td>
-        </tr>
-    </table>
+        <!-- chat interface -->
+        <div class="chat">
+            <div class="chat-container">
+            </div>
+            <div class="message-input-container">
+                <input type="text" id="messageInput" class="message-input" placeholder="שאל שאלה...">
+                <button class="upload-btn" id="uploadBtn">שלח</button>
+            </div>
+        </div>
     </div>
-</div>
-<div class="message-input-container">
-    <input type="text" id="messageInput" class="message-input" style="margin-right: 5px"  placeholder="Ask a question...">
-    <!-- select doc from list-->
-    <select id="docSelect" class="select-doc-input" style="margin-right: 15px">
-        <option>Select a document</option>
-    </select>
-</div>
-
-<script>
-    const selectDoc = document.getElementById('docSelect');
-    const messageInput = document.getElementById('messageInput');
-    const loader = document.getElementById('loader');
-    const chatContainer = document.querySelector('.chat-container');
-    var selectedDoc = undefined;
-
-    fetch('/available_plans', {
-        method: 'GET',
-        headers: {
-            'Content-Type': 'application/json'
-        }
-    }).then(response => response.json())
-    .then(data => {
-        console.log(data);
-        data.forEach(doc => {
-            const option = document.createElement('option');
-            option.value = doc;
-            option.textContent = doc;
-            selectDoc.appendChild(option);
-        });
-    })
-    .catch(error => console.error('Error:', error));
-
-    selectDoc.addEventListener('change', function() {
-        if (selectDoc.value !== 'Select a document') {
-            if (selectedDoc !== selectDoc.value) {
-                selectedDoc = selectDoc.value;
-                // chatContainer.innerHTML = ''; // Clear chat
-                const userMessage = document.createElement('div');
-                userMessage.className = 'chat-box user-message';
-                userMessage.innerHTML = `<table  style="display:inline"><tr><td><span>Selected document: ${selectedDoc}</span></td><td><img src="static/user-icon.jpg" style="margin-left: 8px; border-radius: 50%; width: 40px;"></td></tr></table>`;
-                chatContainer.appendChild(userMessage);
-            }
-        }
-    });
-
-    messageInput.addEventListener('keypress', function(e) {
-        if (e.key === 'Enter') {
-            const message = messageInput.value.trim();
-            if (message !== '') {
-                displayUserMessage(message);
-                if (selectDoc.value === 'Select a document') {
-                    fetch('/ask_general', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ question: message })
-                    })
-                    .then(response => response.json())
-                    .then(data => displayResTable(data.columns, data.data))
-                    .catch(error => console.error('Error:', error));
-                } else {
-                    fetch(`/ask/${selectedDoc}`, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ question: message })
-                    })
-                    .then(response => response.json())
-                    .then(data => displayBotMessage(data.message, data.sources))
-                    .catch(error => console.error('Error:', error));
-                }
-                messageInput.value = '';
-            }
-        }
-    });
-
-    function displayUserMessage(message) {
-        const userMessage = document.createElement('div');
-        userMessage.className = 'chat-box user-message';
-        // userMessage.textContent = message;
-        userMessage.innerHTML = `<table  style="display:inline"><tr><td><span>${message}</span></td><td><img src="static/user-icon.jpg" style="margin-left: 8px; border-radius: 50%; width: 40px;"></td></tr></table>`;
-        // <span>${message}</span><img src="static/user-icon.jpg" style="margin-left: 8px; border-radius: 50%; width: 40px;">`;
-        chatContainer.appendChild(userMessage);
-    }
-
-    function displayBotMessage(message, sources) {
-        console.log(sources);
-        if (sources) {
-            for (let i = 0; i < sources.length; i++) {
-                const sourceMessage = document.createElement('div');
-                sourceMessage.className = 'chat-box source-message';
-                sourceMessage.innerHTML = `<table  style="display:inline"><tr><td><img src="static/source_icon.png" style="margin-right: 8px; border-radius: 50%; width: 40px;"></td><td><span>${sources[i]}</span></td></tr></table>`;
-                chatContainer.appendChild(sourceMessage);
-            }
-        }
-        const botMessage = document.createElement('div');
-        botMessage.className = 'chat-box bot-message';
-        botMessage.innerHTML = `<table  style="display:inline"><tr><td><img src="static/bot_icon.png" style="margin-right: 8px; border-radius: 50%; width: 40px;"></td><td><span>${message}</span></td></tr></table>`;
-        chatContainer.appendChild(botMessage);
-    }
-    function displayResTable(cols, data){
-        var table = document.createElement('table');
-        var tr = table.insertRow(-1);
-        for (var i = 0; i < cols.length; i++) {
-            var th = document.createElement('th');
-            th.innerHTML = cols[i];
-            tr.appendChild(th);
-        }
-        for (var i = 0; i < data.length; i++) {
-            tr = table.insertRow(-1);
-            for (var j = 0; j < cols.length; j++) {
-                var tabCell = tr.insertCell(-1);
-                tabCell.innerHTML = data[i][cols[j]];
-            }
-        }
-        const botMessage = document.createElement('div');
-        botMessage.className = 'chat-box bot-message';
-        // add table to bot message and add icon
-
-        botMessage.innerHTML = `<table  style="display:inline"><tr><td><img src="static/bot_icon.png" style="margin-right: 8px; border-radius: 50%; width: 40px;"></td><td><span>Here is the results:</span></td></tr></table>`;
-        botMessage.appendChild(table);
-        chatContainer.appendChild(botMessage);
-    }
-</script>
-
+    <div id="about-section" class="content-section">
+        <h2>על הפרוייקט</h2>
+        <p>פרוייקט זה נוצר על ידי צוות המפתחים של UrbanGPT על מנת לספק פתרון חכם לשאלות הקשורות לנכסים ולשירותים הקשורים אליהם.</p>
+    </div>
+    <div id="contact-section" class="content-section">
+        <h2>צור קשר</h2>
+        <p>לכל שאלה או בקשה, אנא צרו קשר עם צוות התמיכה שלנו באמצעות הטופס הבא:</p>
+        <form id="contactForm">
+            <label for="name">שם:</label>
+            <input type="text" id="name" name="name" required>
+            <label for="email">אימייל:</label>
+            <input type="email" id="email" name="email" required>
+            <label for="message">הודעה:</label>
+            <textarea id="message" name="message" required></textarea>
+            <button type="submit">שלח</button>
+        </form>
+    </div>
 </body>
 </html>
-

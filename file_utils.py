@@ -3,7 +3,7 @@ from download_program_doc import extract_xplan_number,program_doc_url
 from urllib.parse import unquote
 import os
 import requests
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 import textract
 import re
 from langchain.docstore.document import Document
@@ -13,7 +13,8 @@ import time
 import random
 from itertools import chain
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-
+import logging
+logger = logging.getLogger(__name__)
 
 def get_docs_for_plan(plan_number):
     xplan_number = extract_xplan_number(plan_number)
@@ -108,9 +109,13 @@ def pdf_bin_to_text(pdf_bin):
 
 def clean_text(text):
     # Define the pattern for the unwanted text
-    unwanted_pattern = r'תכנון זמין\s+[0-9]+\s+מונה\s+הדפסה'
+    unwanted_pattern = r'תכנון זמין(\s|\n)*[0-9]*(\s|\n)*+מונה\s+הדפסה'
     cleaned_text = re.sub(unwanted_pattern, '', text)
-    return cleaned_text
+    
+    # if there's more then 2 newline, remove them
+    cleaned_text = re.sub(r'\n\n+', '\n\n', cleaned_text)
+
+    return cleaned_text.strip()
 
 def clean_and_split(text, doc_id=None, chunk_size=2048, chunk_overlap=128):
     cleaned_text = clean_text(text)
@@ -147,15 +152,17 @@ def get_text_for_plan(plan_number):
 
 if __name__ == '__main__':
     data = pd.read_csv('shpan.csv')
-
-    files_text = (pdf_to_text(doc) for doc in temp_get_docs_for_plan(data['pl_number'][0]))
-
+    pl_nums = data['pl_number'].sort_values().unique()
+    files_text = [(pdf_to_text(doc) for doc in temp_get_docs_for_plan(pl_num)) for pl_num in pl_nums]
+    files_cleand = ["\n".join([clean_text(text) for text in texts]) for texts in files_text]
+    filtered_docs = [doc for doc in files_cleand if len(doc.strip()) > 0]
+    print(len(files_cleand))
     # for each doc, clean and split to chunks
-    files_cleand_chunks = [clean_and_split(text) for text in files_text]
-    flattened_documents = list(chain(*files_cleand_chunks))
-    print(type(flattened_documents[0]))
+    # files_cleand_chunks = [clean_and_split(text) for text in files_text]
+    # flattened_documents = list(chain(*files_cleand_chunks))
+    # print(type(flattened_documents[0]))
 
-    print(type(files_cleand_chunks[0]))
+    # print(type(files_cleand_chunks[0]))
 
         
 

@@ -1,5 +1,6 @@
 from langchain.docstore.document import Document
 from langchain_community.vectorstores import FAISS
+from langchain_core.vectorstores import VectorStoreRetriever
 from langchain.prompts import PromptTemplate
 from file_utils import pdf_to_text, clean_and_split, temp_get_docs_for_plan, pdf_bin_to_text, clean_text
 from models import get_embedding_model, get_llm
@@ -15,7 +16,12 @@ import time
 from langchain_core.exceptions import OutputParserException
 from langchain_core.output_parsers import BaseOutputParser
 from datetime import datetime
+import dateutil.parser as parser
 import logging
+import torch
+from dataclasses import Field, dataclass,field
+from typing import List
+
 logger = logging.getLogger(__name__)
 
 def diffrent_question_rephrasing(question, k=10, model=None):
@@ -37,18 +43,69 @@ def diffrent_question_rephrasing(question, k=10, model=None):
     output_parser_list.append(question)
     return output_parser_list
 
-def question_from_description(description, model=None):
+def question_from_description(description, model=None, answer_parser=None):
     if model is None:
         model = get_llm()
+        
+    parser = QuestionOutputParser()
     prompt_template = """
-    Human: בהינתן תיאור השדה הבא, נסח שאלה שתישאל על כל מסמך בכדי לקבל את המידע הרלוונטי לשדה זה.
-    תיאור: " {description} "
-    Assistent:
+    בהינתן תיאור השדה הבא, נסח שאלה שתישאל על כל מסמך בכדי לקבל את המידע הרלוונטי לשדה זה.
+    על השאלה לדרוש שדה המתאים לתיאור, לדוגמה, אם התיאור מתאר כמות יחידות דיור בתוכנית, נספק שאלה שתדרוש את מספר היחידות הדיור בתוכנית.
+    אם התיאור מתאר את שכונת התוכנית, נספק שאלה שתדרוש את שכונת התוכנית.
+    תיאור: "{description}"
+    {format_description}
+    """
+    if answer_parser is not None:
+    #     prompt_template += f"התשובות לשאלה צריכות להתאים לפורמט: \"{answer_parser.get_format_instructions()}\" אז נסח את השאלה בהתאם."
+        prompt_template += f"נסח את השאלה כך שתדרוש את הערך הרלוונטי לשדה מסוג {answer_parser.get_type()} המתאים לתיאור זה."
+    prompt = PromptTemplate.from_template(prompt_template)
+    question_chain = prompt | model | parser
+    output = question_chain.invoke(dict(description=description, format_description=parser.get_format_instructions()))
+    if type(output) != str:
+        output = output.content
+    logger.info(f"from description: {description} got question: {output}")
+    return output
+
+def query_from_description(description, model=None):
+    if model is None:
+        model = get_llm()
+        
+    prompt_template = """
+    בהינתן תיאור השדה הבא, נסח שאילתת חיפוש מתאימה.
+    תיאור: "{description}"
+    על השאילתה להיות בעברית, קצרה ומדוייקת ככל האפשר.
+    על השאילתא לא לכלול יחידות מידה או מילות מפתח שעלולות לבלבל את החיפוש ולהביא תוצאות לא רלוונטיות.
     """
     prompt = PromptTemplate.from_template(prompt_template)
     question_chain = prompt | model
-    output = question_chain.invoke(dict(description=description)).content
+    output = question_chain.invoke(dict(description=description))
+    if type(output) != str:
+        output = output.content
+    logger.info(f"from description: {description} got query: {output}")
     return output
+
+def query_from_question(question, model=None):
+    if model is None:
+        model = get_llm()
+        
+    prompt_template = """
+    בהינתן השאלה הבאה, נסח שאילתת חיפוש מתאימה.
+    שאלה: "{question}"
+    על השאילתה להיות בעברית, קצרה ומדוייקת ככל האפשר.
+    על השאילתא לא לכלול יחידות מידה או מילות מפתח שעלולות לבלבל את החיפוש ולהביא תוצאות לא רלוונטיות.
+    """
+    prompt = PromptTemplate.from_template(prompt_template)
+    question_chain = prompt | model
+    output = question_chain.invoke(dict(question=question))
+    if type(output) != str:
+        output = output.content
+    logger.info(f"from question: {question} got query: {output}")
+    return output
+
+def get_top_k(question, db, pl_number=None, k=3):
+    doc_filter = dict(doc_id=pl_number) if pl_number else None
+    docs = db.similarity_search(question, filter=doc_filter, fetch_k=db.index.ntotal, k=k)
+    return [doc.page_content for doc in docs]
 
 def get_top_k_by_count(questions, db, pl_number=None, k=3, verbose=False):
     docs_counts = {}
@@ -72,7 +129,6 @@ def get_top_k_by_count(questions, db, pl_number=None, k=3, verbose=False):
     if verbose:
         print("counts:", [val for key,val in sorted_docs])
     return [key for key,val in sorted_docs[:k]]
-
 
 def get_top_k_by_count_foreach(questions, db, k=3):
     db_size = db.index.ntotal
@@ -109,24 +165,23 @@ def get_top_k_by_count_foreach(questions, db, k=3):
         
     return top_cunks_by_doc
 
-def get_db(data,path):
+def get_db(data,path, chunk_size=512, chunk_overlap=128):
     if(os.path.exists(path)):
-        db = FAISS.load_local(path,get_embedding_model())
+        db = FAISS.load_local(path,get_embedding_model(), allow_dangerous_deserialization=True)
         return db
     documents = []
     for i,row in data.iterrows():
-        print(f"{i}s document:")
         # Get text from all docs
         files_text = (pdf_to_text(doc) for doc in temp_get_docs_for_plan(row['pl_number']))
-        print(row['pl_number'])
 
         # for each doc, clean and split to chunks
-        files_cleand_chunks = [clean_and_split(text, row['pl_number']) for text in files_text]
+        files_cleand_chunks = [clean_and_split(text, row['pl_number'], chunk_size=chunk_size, chunk_overlap=chunk_overlap) for text in files_text]
         # flatten files chunck to 1d list
         flattened_documents = list(chain(*files_cleand_chunks))
-
+        logger.info(f"loaded plan {row['pl_number']} with {len(flattened_documents)} docs")
         documents.extend(flattened_documents)
     embeddings = get_embedding_model()
+    assert len(documents) > 0, "No documents found for indexing."
     db = FAISS.from_documents(documents, embeddings)
     db.save_local(path)
     return db
@@ -139,10 +194,26 @@ def create_db(file):
     db = FAISS.from_documents(documents, embeddings)
     return db
 
+def create_vector_from_df(plans_df, chunk_size=512, chunk_overlap=128):
+    documents = []
+    logger.info(f"plans_df: {plans_df}")
+    for i,row in plans_df.iterrows():
+        # Get text from all docs
+        files_text = row['content']
+
+        # for each doc, clean and split to chunks
+        files_cleand_chunks = clean_and_split(files_text, row['id'], chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        logger.info(f"loaded plan {row['id']} with {len(files_cleand_chunks)} docs")
+        documents.extend(files_cleand_chunks)
+    embeddings = get_embedding_model()
+    assert len(documents) > 0, "No documents found for indexing."
+    db = FAISS.from_documents(documents, embeddings)
+    return db
+
 def get_answer(question,chunks, model=None, instructions=None, parser=None):
     if parser is None:
         parser = TextualOutputParser()
-    if len(chunks) == 0:
+    if len(chunks) == 0 or "".join(chunks) == "":
         # return "No document found"
         logger.info(f"document not found for question: {question}")
         return None
@@ -155,28 +226,39 @@ def get_answer(question,chunks, model=None, instructions=None, parser=None):
     prompt_message = "בהינתן מספר קטעים מתוך מסמך תכנון הבנייה ושאלה בנוגע לתוכנית שבמסמך, מצא את התשובה המדוייקת לשאלה על בסיס המסמך וענה עליה בקצרה ובמדויק." if instructions is None else instructions
     # the new text contain the first 3 of the retrived docs 
     prompt_template = """
-    Human: {prompt_message}
+    {prompt_message}
     קטעים:
     {sources}
     שאלה:
     {question}
     {answer_format}
-    Assistent:
     """
     prompt = PromptTemplate.from_template(prompt_template)
     if model is None:
         model = get_llm()
     chain_llm = prompt | model | parser
-    output = chain_llm.invoke(dict(question=question, sources=sources_template, answer_format=answer_format_description, prompt_message=prompt_message))
+    try:
+        output = chain_llm.invoke(dict(question=question, sources=sources_template, answer_format=answer_format_description, prompt_message=prompt_message))
+    except Exception as e:
+        logger.error(f"error: {e}")
+        if e.__class__.__name__ == "OutOfMemoryError":
+            # print cuda memory usage
+            logger.error(torch.cuda.memory_summary())
+            raise e
+
+        return None
     return output
     
-def get_answer_foreach_doc(question, db, doc_ids, num_docs=3, num_rephrasings=0, model=None, verbose=False, multiprocess=False, parser=None, full_doc=False, instructions=None):
+def get_answer_foreach_doc(question, db, doc_ids, num_docs=3, num_rephrasings=0, model=None, verbose=False, multiprocess=False, parser=None, full_doc=False, instructions=None, query=None):
     if model is None:
         model = get_llm()
     if full_doc:
         docs_chunks = {doc_id:[clean_text(pdf_to_text(doc)) for doc in temp_get_docs_for_plan(doc_id)] for doc_id in doc_ids}
     else:
-        questions = diffrent_question_rephrasing(question, k=num_rephrasings, model=model)
+        if query:
+            questions = [query]
+        else:
+            questions = diffrent_question_rephrasing(question, k=num_rephrasings, model=model)
         if verbose:
             print(questions)
         docs_counts = {k:{} for k in doc_ids}
@@ -206,7 +288,7 @@ def get_answer_foreach_doc(question, db, doc_ids, num_docs=3, num_rephrasings=0,
             }
         answers = pool.starmap(_get_answer, [(pl_num, question, chunks, model) for pl_num,chunks in docs_chunks.items()])
     else:
-        for i,pl_num in tqdm.tqdm(enumerate(doc_ids), total=len(doc_ids)):
+        for i,pl_num in tqdm.tqdm(enumerate(doc_ids[1:]), total=len(doc_ids[1:])):
             # chunks = get_top_k_by_count(questions, db, row['pl_number'], k=num_docs)
             # chunks = list(sorted_docs_count[row['pl_number']].keys())
             chunks = docs_chunks[pl_num]
@@ -226,11 +308,6 @@ def multiquery_retriver(question, db):
     retriever_from_llm = MultiQueryRetriever.from_llm(
         retriever=db.as_retriever(), llm=llm
     )
-    import logging
-
-    logging.basicConfig()
-    logging.getLogger("langchain.retrievers.multi_query").setLevel(logging.INFO)
-
     unique_docs = retriever_from_llm.get_relevant_documents(query=question)
     print("len_docs:",len(unique_docs))
 
@@ -256,6 +333,19 @@ def get_answers_for_all_docs_return_them(question):
     # print("yes_answers:",yes_answers)
     # return answers
 
+class FilteredRetriever(VectorStoreRetriever):
+    vectorstore: VectorStoreRetriever
+    search_type: str = "similarity"
+    search_kwargs: dict = {}
+    doc_id: str
+    k: int = 7
+    
+    def _get_relevant_documents(self, query: str, **kwargs) -> List[Document]:
+        logger.info(f"quering document {self.doc_id} with query: {query}")
+        results = self.vectorstore.get_relevant_documents(query=query,metadata={"doc_id":self.doc_id}, **kwargs, **self.search_kwargs)
+        results = [doc for doc in results if doc.metadata['doc_id'] == self.doc_id][:self.k]
+        logger.info(f"got {len(results)} results from retrval")
+        return results
 
 class BooleanOutputParser(BaseOutputParser[bool]):
     """Boolean boolean parser."""
@@ -263,8 +353,14 @@ class BooleanOutputParser(BaseOutputParser[bool]):
     true_val: str = "כן"
     false_val: str = "לא"
     unknown_val: str = "אין ברשותי מספיק מידע"
+    def __init__(self, true_val: str = "כן", false_val: str = "לא", unknown_val: str = "אין ברשותי מספיק מידע"):
+        super().__init__()
+        self.true_val = true_val
+        self.false_val = false_val
+        self.unknown_val = unknown_val
 
     def parse(self, text: str) -> bool:
+        logger.info(f"parsing boolean: {text}")
         # clean text and remove punctuation
         cleaned_text = text.strip().lower()
         cleaned_text = re.sub(r"[^\w\s]", "", cleaned_text)
@@ -282,7 +378,7 @@ class BooleanOutputParser(BaseOutputParser[bool]):
         return "boolean_output_parser"
     
     def get_format_instructions(self):
-        return "תשובתך צריכה להיות בפורמט כזה: כן, לא או אין ברשותי מספיק מידע."
+        return 'תשובתך צריכה להיות בפורמט כזה: "כן", "לא" או "אין ברשותי מספיק מידע" בלבד, אין להשיב שום פרט נוסף.'
     
     def get_type(self):
         return 'BOOLEAN'
@@ -293,17 +389,19 @@ class NumericOutputParser(BaseOutputParser[int]):
 
     unknown_val = "אין ברשותי מספיק מידע"
     def parse(self, text: str) -> int:
+        logger.info(f"parsing numeric: {text}")
         # clean text and remove punctuation
-        cleaned_text = text.strip()
+        cleaned_text = text.strip().replace(",", "")
+        
         # cleaned_text = re.sub(rf"[{punctuation}]", "", cleaned_text)
         
         if self.unknown_val in cleaned_text:
             return None
         try:
-            return int(cleaned_text)
+            return float(cleaned_text)
         except ValueError:
             raise OutputParserException(
-                f"NumericOutputParser expected output value to be an integer, but "
+                f"NumericOutputParser expected output value to be an numeric value, but "
                 f"Received {cleaned_text}."
             )
 
@@ -312,26 +410,28 @@ class NumericOutputParser(BaseOutputParser[int]):
         return "numeric_output_parser"
     
     def get_format_instructions(self):
-        return f"תשובתך צריכה להיות מספר שלם, אם אין מספיק מידע כדי לספק תשובה תשיב: \"{self.unknown_val}\" בלבד."
+        return f"תשובתך צריכה להיות מספר, אם אין מספיק מידע כדי לספק תשובה תשיב: \"{self.unknown_val}\" בלבד."
     
     def get_type(self):
-        return 'INTEGER'
+        return 'FLOAT'
 
 class TextualOutputParser(BaseOutputParser[str]):
     """Textual output parser."""
 
     unknown_val = "אין ברשותי מספיק מידע"
     def parse(self, text: str) -> str:
+        logger.info(f"parsing text: {text}")
         if self.unknown_val in text:
             return None
-        return text
+        return text.strip()
 
     @property
     def _type(self) -> str:
         return "textual_output_parser"
     
     def get_format_instructions(self)->str:
-        return f"תשובתך צריכה להכיל את התשובה הסופית לשאלה שנשאלה, אם אין מספיק מידע כדי לספק תשובה תשיב: \"{self.unknown_val}\" בלבד."
+        # return f"תשובתך צריכה להכיל את התשובה הסופית לשאלה שנשאלה, אם אין מספיק מידע כדי לספק תשובה תשיב: \"{self.unknown_val}\" בלבד."
+        return f"תשובתך צריכה להכיל את התשובה הסופית לשאלה שנשאלה בלבד. שים לב כי התשובה נכנסת ישירות לבסיס נתונים אז אינה צריכה להכיל נימוקים או הקדמות כגון \"התשובה היא:\" וכו', אם אין מספיק מידע כדי לספק תשובה תשיב: \"{self.unknown_val}\" בלבד."
     
     def get_type(self):
         return 'TEXT'
@@ -341,15 +441,19 @@ class DateOutputParser(BaseOutputParser[str]):
 
     unknown_val = "אין ברשותי מספיק מידע"
     def parse(self, text: str) -> str:
+        text = text.strip()
+        logger.info(f"parsin date: {text}")
         if self.unknown_val in text:
             return None
         try:
-            date = datetime.strptime(text, '%d/%m/%Y')
-            return date
-        except ValueError:
+            # date = datetime.strptime(text, '%d/%m/%Y')
+            date = parser.parse(text, dayfirst = True)
+            return date.strftime('%Y-%m-%d %H:%M:%S.%f')
+        except ValueError as e:
             raise OutputParserException(
                 f"DateOutputParser expected output value to be a date, but "
                 f"Received {text}."
+                f"Error: {e}"
             ) 
     
     @property
@@ -360,7 +464,30 @@ class DateOutputParser(BaseOutputParser[str]):
         return f"תשובתך צריכה להיות תאריך בפורמט: יום/חודש/שנה, אם אין מספיק מידע כדי לספק תשובה תשיב: \"{self.unknown_val}\" בלבד."
 
     def get_type(self):
-        return 'DATE'
+        # return 'TIMESTAMP'
+        return 'TEXT'
+
+class QuestionOutputParser(BaseOutputParser[str]):
+    """Question output parser."""
+
+    def parse(self, text: str) -> str:
+        logger.info(f"parsing question: {text}")
+        if not text.endswith("?") and not '\n' in text:
+            raise OutputParserException(
+                f"QuestionOutputParser expected output value to be a question, but "
+                f"Received {text}."
+            )
+        return text
+
+    @property
+    def _type(self) -> str:
+        return "question_output_parser"
+    
+    def get_format_instructions(self)->str:
+        return f"תשובתך צריכה להיות שאלה בעברית, והשאלה חייבת להסתיים בסימן שאלה. אין צורך בעוד פירוט על התשובה."
+    
+    def get_type(self):
+        return 'TEXT'
 
 if __name__ == '__main__':
     data = pd.read_csv('shpan.csv') # read the data
