@@ -1,94 +1,200 @@
-<!DOCTYPE html>
-<html lang="en" dir="rtl">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>UrbanGPT</title>
-<link rel="stylesheet" href="static/style.css">
-<script src="static/script.js" defer></script>
-</head>
-<body onload="onLoad()">
-    <header>
-        <nav class="navbar">
-            <div class="navbar-container">
-                <div class="navbar-logo">
-                    <img src="static/logo.png" alt="Logo" class="navbar-logo-img">
-                </div>
-                <ul class="navbar-menu">
-                    <li class="navbar-item"><a href="#home" class="navbar-link" data-section="chat-section">בית</a></li>
-                    <li class="navbar-item"><a href="#about" class="navbar-link" data-section="about-section">על הפרוייקט</a></li>
-                    <li class="navbar-item"><a href="#contact" class="navbar-link" data-section="contact-section">צור קשר</a></li>
-                </ul>
-            </div>
-        </nav>
-    </header>
-    <div id="chat-section" class="content-section active">
-        <div class="sidebar">
-            <div>
-                <button id="newChatBtn">צ'אט חדש</button>
-                <button id="editSettingBtn">הגדרות</button>
-                <button id="clearDataBtn">נקה נתונים</button>
-            </div>
-            <div class="chat-mode">
-                <label>בחר סוג צ'אט:</label>
-                <ul id="chatModeList">
-                    <li data-mode="agent" class="active">סוכן</li>
-                    <li data-mode="document">מסמך</li>
-                    <li data-mode="foreach_document">כל המסמכים</li>
-                    <!-- Add more modes as needed -->
-                </ul>
-            </div>
-            <div class="previous-chats">
-                <h3>צ'אטים קודמים</h3>
-                <ul id="chatList">
-                    <!-- Previous chats will be dynamically added here -->
-                </ul>
-            </div>
+{% extends "base.html" %}
+{% block title %}UrbanGPT{% endblock %}
+{% block body_attr %}onload="onLoadIndex()"{% endblock %}
+{% block content %}
+<!-- <div id="chat-section" class="content-section active"> -->
+    <div class="sidebar">
+        <div>
+            <button id="newChatBtn" data-toggle="modal" data-target="#newChatModal">צ'אט חדש</button>
+            <button id="editSettingBtn" data-toggle="modal" data-target="#settingsModal">הגדרות</button>
+            <button id="clearDataBtn"
+            {% if user.is_authenticated and user.permission == "admin" %}
+                style="display: block;"
+            {% else %}
+                style="display: none;"
+            {% endif %}
+                >נקה נתונים</button>
         </div>
-        
-        <!-- Modal for Settings -->
-        <div id="settingsModal" class="modal">
-            <div class="modal-content">
+        <!-- Add more modes as needed -->
+        <div class="previous-chats">
+            <label>צ'אטים קודמים</label>
+            <ul id="chatList">
+                <!-- Previous chats will be dynamically added here -->
+            </ul>
+        </div>
+    </div>
+    
+    <!-- Modal for Settings -->
+    <div id="settingsModal" class="modal" data-callback="initSettingsModal()">
+        <div class="modal-content">
+            <div class="modal-header">
                 <span class="close">&times;</span>
                 <h2>הגדרות</h2>
-                <label for="systemMessage">הודעת מערכת:</label>
-                <textarea id="systemMessage" rows="4"></textarea>
-                <label for="modelName">מודל:</label>
-                <select id="modelName">
+            </div>
+            <div class="modal-body">
+                <label for="systemMessage" class="form-label">הודעת מערכת:</label>
+                <textarea id="systemMessage" rows="4" class="form-control"></textarea>
+                <label for="modelName" class="form-label">מודל:</label>
+                <select id="modelName" class="form-select">
+                    {% for model in models %}
+                        <option value="{{ model }}">{{ model }}</option>
+                    {% endfor %}
                 </select>
-                <label for="numRetrievalDocs">מספר צ'אנקים למסמך:</label>
-                <input type="number" id="numRetrievalDocs" min="1" max="10">
-                <!-- Placeholder for additional settings fields -->
-                <button id="saveSettingsBtn">שמור</button>
+                <label for="docLLMName" class="form-label">מודל תשאול מסמכים:</label>
+                <select id="docLLMName" class="form-select">
+                {% for model in models %}
+                    <option value="{{ model }}">{{ model }}</option>
+                {% endfor %}
+                </select>
+                <label for="numRetrievalDocs" class="form-label" >מספר צ'אנקים למסמך:</label>
+                <input type="number" id="numRetrievalDocs" min="1" max="10" class="form-control">
+            <!-- Placeholder for additional settings fields -->
+            </div>
+            <div class="modal-footer">
+                <button id="saveSettingsBtn" class="btn btn-dark w-100">שמור</button>
             </div>
         </div>
+    </div>
+    
+    <!-- Modal for Settings -->
+    <div id="newChatModal" class="modal" data-callback="initNewChatModal()">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="close">&times;</span>
+                <h2>צ'אט חדש</h2>
+            </div>
+            <div class="modal-body">
+                <label for="chatType">סוג צ'אט</label>
+                <select id="chatType" class="form-select">
+                    <option value="agent">סוכן</option>
+                    <option value="context_chat">צ'אט עם הקשר</option>
+                    <!-- <option value="document">מסמך</option>
+                    <option value="foreach_document">כל המסמכים</option> -->
+                    <!-- Add more modes as needed -->
+                </select>
+                <label for="chatModelName">מודל:</label>
+                <select id="chatModelName" class="form-select">
+                    <!--placeholder-->
+                    <option disabled>בחר מודל</option>
+                    {% for model in models %}
+                        <option value="{{ model }}">{{ model }}</option>
+                    {% endfor %}
+                </select>
+                <div id="retrievalFields">
+                    <label for="chatSystemMessage" class="form-label">הודעת מערכת:</label>
+                    <textarea id="chatSystemMessage" class="form-control" rows="4"></textarea>    
+                    <label for="chatDocLLMName">מודל תשאול מסמכים:</label>
+                    <select id="chatDocLLMName" class="form-select">
+                        {% for model in models %}
+                            <option value="{{ model }}">{{ model }}</option>
+                        {% endfor %}
+                    </select>
+                        <label for="chatNumRetrievalDocs" class="form-label">מספר צ'אנקים למסמך:</label>
+                        <input type="range" class="form-control form-range" id="chatNumRetrievalDocs" min="1" max="10" value="3" onchange="setElementValue('chatNumRetrievalDocsValue', this.value)">
+                        <label for="chatNumRetrievalDocsValue" class="form-label">ערך נוכחי: <span id="chatNumRetrievalDocsValue">3</span></label>
+                </div>
+                
+                
+                <div id="selectDocuments">
+                    <label for="documentsCheckboxes" class="form-label">בחר מסמכים:</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control" id="searchBox" onkeyup="filterCheckboxes()" placeholder="חפש מסמכים..">
+                        <!-- Filter Button -->
+                        <button class="btn btn-outline-secondary" data-toggle="modal" data-target="#filterModal">
+                            <i class="fa fa-filter"></i>
+                        </button>
+                        <div class="input-group-text">
+                            <input class="form-check-input mt-0 me-2" type="checkbox" id="selectAll" onclick="toggleSelectAll()">
+                            <label for="selectAll">בחר הכל</label>
+                        </div>
+                    </div>
+                    <!-- Active Filters Display -->
+                    <div id="activeFilters" class="d-flex flex-wrap"></div>
+                    <div id="documentsCheckboxes">
+                        <div class="checkbox-container">
+                            {% for doc in documents %}
+                                <div>
+                                    <input type="checkbox" class="checkbox-button" id="doc{{ doc.id }}" name="doc{{ doc.id }}" value="{{ doc.id }}"
+                                    {% for k,v in doc.items() %}
+                                        data-{{ k }}="{{ v }}"
+                                    {% endfor %}
+                                    >
+                                    <label for="doc{{ doc.id }}" class="checkbox-label">{{ doc.name }}</label><br>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="createNewChat" class="btn btn-dark w-100">צור צ'אט</button>
+            </div>
+        </div>
+    </div>
 
-        <!-- chat interface -->
-        <div class="chat">
-            <div class="chat-container">
+    <!-- Filter Modal -->
+    <div id="filterModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="close">&times;</span>
+                <h2>הוסף מסנן</h2>
             </div>
-            <div class="message-input-container">
-                <input type="text" id="messageInput" class="message-input" placeholder="שאל שאלה...">
-                <button class="upload-btn" id="uploadBtn">שלח</button>
-            </div>
+            <form id="filterForm">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label for="property" class="form-label">בחר מאפיין:</label>
+                        <select id="property" class="form-select" onchange="updateCriteriaInput()">
+                            <option value="" disabled selected>בחר מאפיין</option>
+                            {% for column in columns %}
+                                <option value="{{ column.name }}" data-type="{{ column.type }}">{{ column.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div id="criteriaInputContainer">
+                        <!-- Criteria input will be dynamically generated based on selected property -->
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-dark w-100" onclick="addFilter()">Add Filter</button>
+                </div>
+            </form>
         </div>
     </div>
+
+
+    <!-- chat interface -->
+    <div class="chat">
+        <div id="chat-list">
+            <div class="chat-container active" id="chat-new">
+                <div class="chat-header">
+                    <h3>צ'אט חדש</h3>
+                </div>
+                <div class="chat-body">
+                    <!-- Chat messages will be dynamically added here -->
+                </div>
+            </div>
+        </div>
+        <div class="message-input-container">
+            <input type="text" id="messageInput" class="message-input" placeholder="שאל שאלה...">
+            <button class="upload-btn" id="uploadBtn">שלח</button>
+        </div>
+    </div>
+<!-- </div>
     <div id="about-section" class="content-section">
-        <h2>על הפרוייקט</h2>
-        <p>פרוייקט זה נוצר על ידי צוות המפתחים של UrbanGPT על מנת לספק פתרון חכם לשאלות הקשורות לנכסים ולשירותים הקשורים אליהם.</p>
-    </div>
-    <div id="contact-section" class="content-section">
-        <h2>צור קשר</h2>
-        <p>לכל שאלה או בקשה, אנא צרו קשר עם צוות התמיכה שלנו באמצעות הטופס הבא:</p>
-        <form id="contactForm">
-            <label for="name">שם:</label>
-            <input type="text" id="name" name="name" required>
-            <label for="email">אימייל:</label>
-            <input type="email" id="email" name="email" required>
-            <label for="message">הודעה:</label>
-            <textarea id="message" name="message" required></textarea>
-            <button type="submit">שלח</button>
-        </form>
-    </div>
-</body>
-</html>
+    <h2>על הפרוייקט</h2>
+    <p>פרוייקט זה נוצר על ידי צוות המפתחים של UrbanGPT על מנת לספק פתרון חכם לשאלות הקשורות לנכסים ולשירותים הקשורים אליהם.</p>
+</div>
+<div id="contact-section" class="content-section">
+    <h2>צור קשר</h2>
+    <p>לכל שאלה או בקשה, אנא צרו קשר עם צוות התמיכה שלנו באמצעות הטופס הבא:</p>
+    <form id="contactForm">
+        <label for="name">שם:</label>
+        <input type="text" id="name" name="name" required>
+        <label for="email">אימייל:</label>
+        <input type="email" id="email" name="email" required>
+        <label for="message">הודעה:</label>
+        <textarea id="message" name="message" required></textarea>
+        <button type="submit">שלח</button>
+    </form>
+</div> -->
+{% endblock %}

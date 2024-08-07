@@ -1,8 +1,4 @@
 import pytest
-from agent import get_agent, get_tools, stream_agent, system_message, create_plans_index,agentic_question_ansewr
-from RAG import get_top_k, create_vector_from_df, BooleanOutputParser, query_from_question, get_answer, question_from_description, query_from_description
-from file_utils import get_docs_for_plan, pdf_bin_to_text
-from models import get_embedding_model, get_llm, get_openai_llm
 import pandas as pd
 import os
 import logging
@@ -10,6 +6,11 @@ from langchain.prompts import PromptTemplate
 from datetime import datetime
 import sqlite3
 from langchain_community.vectorstores import FAISS
+
+from agent import get_agent, get_tools, stream_agent, system_message, create_plans_index,agentic_question_ansewr
+from RAG import get_top_k, create_vector_from_df, BooleanOutputParser, query_from_question, get_answer, question_from_description, query_from_description
+from file_utils import get_docs_for_plan, pdf_bin_to_text, get_docs_for_plan_selenum
+from models import get_embedding_model, get_llm, get_openai_llm
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 logger = logging.getLogger(__name__)
@@ -91,6 +92,16 @@ def llm_verify_chunk(question, chunk, llm):
     chain = prompt_template | llm | BooleanOutputParser(true_val="yes", false_val="no", unknown_val="unknown")
     return chain.invoke({"question": question, "chunk": chunk})
 
+@pytest.mark.parametrize("pl_number", [
+    "101-1192871",
+    "101-1194000",
+    "101-1205152",
+])
+def test_download_pdf(pl_number):
+    pdf_dir = get_docs_for_plan_selenum(pl_number, path=f"test/{date}")
+    pdfs_in_dir = [f for f in os.listdir(pdf_dir) if f.endswith('.pdf')]
+    assert len(pdfs_in_dir) > 0, "No pdf files were downloaded."
+
 @pytest.mark.parametrize("question, ground_truth, doc_id", [
     ("מהי השכונה בה מתוכננת התוכנית?", "קריית היובל", "101-1192871"),
     ('כמה מ"ר שצ"פ אקטיבי מאושר יש בתוכנית?', '3,639 מ"ר', '101-1192871'),
@@ -164,4 +175,4 @@ def test_ask_agent(init_data, question, ground_truth):
     assert llm_verify_answer(question, ground_truth, result, llm), f"The model answer is {result.content} which is incorrect."
 
 if __name__ == '__main__':
-    pytest.main([__file__, '--log-level=INFO', '--log-format="%(asctime)s - %(levelname)s - %(message)s"', f'--log-file=test/{date}/test.log'])
+    pytest.main([__file__, '--log-level=INFO', '--log-format="%(asctime)s - %(levelname)s - %(message)s"', f'--log-file=out/{date}/log.txt'])

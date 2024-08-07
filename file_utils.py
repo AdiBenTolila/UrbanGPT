@@ -42,7 +42,7 @@ def temp_get_docs_for_plan(plan_number):
         if "הוראות" in file:
             yield f"out/{plan_number}/{file}"
 
-def get_docs_for_plan_selenum(plan_number,redownload=False,retry=3):
+def get_docs_for_plan_selenum(plan_number,redownload=False,retry=3, path = "out"):
     pwd = os.getcwd()
     xplan_number = extract_xplan_number(plan_number)
 
@@ -52,11 +52,11 @@ def get_docs_for_plan_selenum(plan_number,redownload=False,retry=3):
     # Start a new Chrome browser session
     chrome_options = webdriver.ChromeOptions()
     chrome_options.add_argument('--headless')
-    os.makedirs(f'{pwd}/out/{plan_number}', exist_ok=True)
+    os.makedirs(f'{pwd}/{path}/{plan_number}', exist_ok=True)
     # if file already exists, return without downloading
-    if os.listdir(f'{pwd}/out/{plan_number}') and not redownload:
+    if os.listdir(f'{pwd}/{path}/{plan_number}') and not redownload:
         return
-    prefs = {'download.default_directory' : f'{pwd}/out/{plan_number}/'}
+    prefs = {'download.default_directory' : f'{pwd}/{path}/{plan_number}/'}
     chrome_options.add_experimental_option('prefs', prefs)
     driver = webdriver.Chrome(options=chrome_options)
 
@@ -81,13 +81,14 @@ def get_docs_for_plan_selenum(plan_number,redownload=False,retry=3):
             time.sleep(5 + amount)
 
     # if file was not downloaded, remove the folder
-    if not os.listdir(f'{pwd}/out/{plan_number}'):
-        os.rmdir(f'{pwd}/out/{plan_number}')
+    if not os.listdir(f'{pwd}/{path}/{plan_number}'):
+        os.rmdir(f'{pwd}/{path}/{plan_number}')
         print(f'no file for {plan_number}')
     else:
         print(f'downloaded {plan_number}')
     # Close the browser
-    driver.quit()    
+    driver.quit()
+    return f'{pwd}/{path}/{plan_number}'
 
 def pdf_to_text(filename):
     pdffileobj = open(filename, 'rb')
@@ -117,7 +118,7 @@ def clean_text(text):
 
     return cleaned_text.strip()
 
-def clean_and_split(text, doc_id=None, chunk_size=2048, chunk_overlap=128):
+def clean_and_split(text, doc_id=None, chunk_size=512, chunk_overlap=128):
     cleaned_text = clean_text(text)
 
     text_splitter = RecursiveCharacterTextSplitter(

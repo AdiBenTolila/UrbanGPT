@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}צור קשר{% endblock %}
+{% block content %}
+<div class="container">
+    <div class="row">
+        <div class="col-lg-12">
+            <h1 class="mt-5">צור קשר</h1>
+            <p class="lead">אם יש שאלות, תהייה או רעיונות, אנא צרו קשר עמנו.</p>
+            <p>נשמח לעזור בכל דבר שתצטרכו.</p>
+            <p>ניתן ליצור קשר באמצעות הטופס הבא:</p>
+            <form method="POST" action="/contact">
+                <div class="form-group mb-3">
+                    <label for="name">שם:</label>
+                    <input type="text" class="form-control" id="name" name="name" required>
+                </div>
+                <div class="form-group mb-3">
+                    <label for="email">אימייל:</label>
+                    <input type="email" class="form-control" id="email" name="email" required>
+                </div>
+                <div class="form-group mb-3">
+                    <label for="message">הודעה:</label>
+                    <textarea class="form-control" id="message" name="message" required></textarea>
+                </div>
+                <button type="submit" class="btn btn-dark btn-block w-100">שלח</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
