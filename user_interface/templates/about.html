@@ -2,15 +2,30 @@
 {% block title %}על הפרוייקט{% endblock %}
 {% block content %}
 <div class="container">
-    <div class="row">
+    <div class="row" id="about">
         <div class="col-lg-12">
             <h1 class="mt-5">על הפרוייקט</h1>
-            <p class="lead">פרוייקט זה נוצר על מנת להפיק תשובות על בסיס טקסט מקורי מהאינטרנט.</p>
-            <p>הפרוייקט משתמש במודל של גוגל, ומטרתו להפיק תשובות על בסיס שאלות שמספקים המשתמשים.</p>
-            <p>המודל משתמש בשיטת פיתוח חדשה של גוגל, שמשלבת בין רשת נוירונים לבין טכניקות חיפוש טקסטואליות.</p>
-            <p>המודל מאפשר למשתמשים לשאול שאלות ולקבל תשובות מהמודל, ולקבל תשובות מקוריות ומדויקות.</p>
-            <p>המודל משתמש בטכניקות חיפוש טקסטואליות כדי למצוא את התשובות הטובות ביותר לשאלות שמספקים המשתמשים.</p>
-            <p>המודל משתמש ברשת נוירונים עמוקה כדי להבין את השאלות שמספקים המשתמשים, ולהפיק תשובות מדויקות ומקוריות.</p>
+            <div id="aboutText">
+                <p>{{ about_text }}</p>
+                {% if user.permission == 'admin' %}
+                    <button class="btn btn-primary m-1" id="editAboutBtn" onclick="setAboutEditing()">
+                        <i class="fas fa-edit"></i> עריכה
+                    </button>
+                {% endif %}
+            </div>
+            {% if user.permission == 'admin' %}
+                <div id="aboutEdit" style="display: none;">
+                    <form method="post" action="/about">
+                        <div class="form-group">
+                            <label for="aboutTextArea">עריכת טקסט</label>
+                            <textarea class="form-control" id="aboutTextArea" name="about_text" rows="10">{{ about_text }}</textarea>
+                        </div>
+                        <button type="submit" class="btn btn-primary m-1">
+                            <i class="fas fa-save"></i> שמור
+                        </button>
+                    </form>
+                </div>
+            {% endif %}
         </div>
     </div>
 </div>

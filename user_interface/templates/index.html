@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-{% block title %}UrbanGPT{% endblock %}
 {% block body_attr %}onload="onLoadIndex()"{% endblock %}
 {% block content %}
 <!-- <div id="chat-section" class="content-section active"> -->
@@ -7,13 +6,14 @@
         <div>
             <button id="newChatBtn" data-toggle="modal" data-target="#newChatModal">צ'אט חדש</button>
             <button id="editSettingBtn" data-toggle="modal" data-target="#settingsModal">הגדרות</button>
-            <button id="clearDataBtn"
+            
+            <!--button id="clearDataBtn"
             {% if user.is_authenticated and user.permission == "admin" %}
                 style="display: block;"
             {% else %}
                 style="display: none;"
             {% endif %}
-                >נקה נתונים</button>
+                >נקה נתונים</button-->
         </div>
         <!-- Add more modes as needed -->
         <div class="previous-chats">
@@ -161,20 +161,16 @@
         </div>
     </div>
 
-
     <!-- chat interface -->
     <div class="chat">
-        <div id="chat-list">
-            <div class="chat-container active" id="chat-new">
-                <div class="chat-header">
-                    <h3>צ'אט חדש</h3>
-                </div>
-                <div class="chat-body">
-                    <!-- Chat messages will be dynamically added here -->
-                </div>
-            </div>
+        <div class="chat-placeholder">
+            <h1>ברוך הבא ל UrbanGPT.</h1>
+            <h2>לחץ על צ'אט חדש על מנת להתחיל</h2>
         </div>
-        <div class="message-input-container">
+        <div id="chat-list">
+
+        </div>
+        <div class="message-input-container d-none">
             <input type="text" id="messageInput" class="message-input" placeholder="שאל שאלה...">
             <button class="upload-btn" id="uploadBtn">שלח</button>
         </div>

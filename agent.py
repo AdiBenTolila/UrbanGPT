@@ -8,12 +8,15 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.tools.retriever import create_retriever_tool
 from langchain_core.pydantic_v1 import BaseModel
 from langchain_core.runnables.config import RunnableConfig
+from langchain_community.vectorstores import FAISS
+
+from models import get_embedding_model, get_llm,get_vertex_llm, get_gemini_llm,get_claude_llm, get_huggingface_llm,get_llamaCpp_llm,get_huggingface_chat, get_openai_llm
+from file_utils import get_text_for_plan, pdf_bin_to_text, clean_and_split
+from RAG import get_answer_foreach_doc, TextualOutputParser, NumericOutputParser, BooleanOutputParser, DateOutputParser, question_from_description, get_db, queries_from_description, FilteredRetriever, get_top_k, get_answer
+
+from download_program_doc import extract_xplan_attributes
 
 import pandas as pd
-from models import get_embedding_model, get_llm,get_vertex_llm, get_gemini_llm,get_claude_llm, get_huggingface_llm,get_llamaCpp_llm,get_huggingface_chat, get_openai_llm
-from langchain_community.vectorstores import FAISS
-from file_utils import get_text_for_plan
-from RAG import get_answer_foreach_doc, TextualOutputParser, NumericOutputParser, BooleanOutputParser, DateOutputParser, question_from_description, get_db, query_from_description, FilteredRetriever
 import sqlite3
 import dotenv
 import os
@@ -21,11 +24,14 @@ import logging
 from datetime import datetime
 import torch
 import re
+import json
 from multiprocessing import Lock
 
+ROOT_PATH = os.path.dirname(os.path.abspath(__file__))
 
 logger = logging.getLogger(__name__)
 dotenv.load_dotenv()
+create_col_mutex = Lock()
 
 system_message = """
             you are a professional agent that can answer questions about urban planning based on documents from the database.
@@ -46,8 +52,8 @@ system_message = """
 def create_plans_index(db_name, data, limit=None):
     conn = sqlite3.connect(db_name)
     
-    indexes = data[['pl_number', 'pl_name', 'receiving_date']].copy()
-    indexes.columns = ['id', 'name', 'receiving_date']
+    indexes = data[['pl_number', 'pl_name', 'receiving_date', 'open_date', 'station_desc']].copy()
+    indexes.columns = ['id', 'name', 'receiving_date', 'approval_date', 'status']
     # convert date to ISO8601 notation: YYYY-MM-DD HH:MM:SS.SSS
     # indexes['receiving_date'] = pd.to_datetime(indexes['receiving_date'], errors='coerce').dt.strftime('%Y-%m-%d %H:%M:%S.%f')
     # indexes['receiving_date'] = pd.to_datetime(indexes['receiving_date'], errors='coerce').timestamp()
@@ -59,8 +65,8 @@ def create_plans_index(db_name, data, limit=None):
     logger.info(f"create_plans_index with {len(indexes)} documents")
     # indexes.to_sql("plans", conn, index=False, if_exists='replace')
     conn.execute("DROP TABLE IF EXISTS plans")
-    conn.execute("CREATE TABLE plans (id TEXT PRIMARY_KRY, name TEXT, receiving_date TIMESTAMP, content TEXT)")
-    conn.executemany("INSERT INTO plans (id, name, receiving_date, content) VALUES (?, ?, ?, ?)", indexes.to_records(index=False))    
+    conn.execute("CREATE TABLE plans (id TEXT PRIMARY_KRY, name TEXT, receiving_date TIMESTAMP, approval_date  TIMESTAMP, status TEXT, content TEXT)")
+    conn.executemany("INSERT INTO plans (id, name, receiving_date, approval_date, status, content) VALUES (?, ?, ?, ?, ?, ?)", indexes.to_records(index=False))    
     
     # drop the columns table if exists
     conn.execute("DROP TABLE IF EXISTS columns")
@@ -69,6 +75,8 @@ def create_plans_index(db_name, data, limit=None):
         ('id', 'TEXT', 'מספר מזהה של התוכנית'),
         ('name', 'TEXT', 'שם התוכנית'),
         ('receiving_date', 'TIMESTAMP', 'תאריך קבלת התוכנית'),
+        ('approval_date', 'TIMESTAMP', 'תאריך אישור התוכנית'),
+        ('status', 'TEXT', 'סטטוס התוכנית'),
         # ('content', 'TEXT', 'מסמך התוכנית המלא, מכיל את כל המידע הקיים במסמך')
         ])
     conn.commit()
@@ -87,16 +95,65 @@ def add_plans_index(db_name, documents, id):
     
     conn.close()
 
-def insert_new_column(column_name, column_type, column_description, data, question=None, search_query=None, db_name='indexis.db', table_name='plans', col_table_name='columns'):
+def insert_new_column(column_name, column_type, column_description, data, question=None, search_queries=[], db_name='indexis.db', table_name='plans', col_table_name='columns'):
     conn = sqlite3.connect(db_name)
     if column_name in [name for _, name, _, _, _, _ in conn.execute(f"PRAGMA table_info({table_name})").fetchall()]:
         conn.execute(f"ALTER TABLE {table_name} DROP COLUMN {column_name}")
     conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
     
     conn.executemany(f"UPDATE {table_name} SET {column_name}=? WHERE id=?", [(r['value'], r['id']) for r in data])
-    conn.execute(f"INSERT OR REPLACE INTO {col_table_name} (name, description, type, question, search_query) VALUES (?, ?, ?, ?, ?)", (column_name, column_description, column_type, question, search_query))
+    conn.execute(f"INSERT OR REPLACE INTO {col_table_name} (name, description, type, question, search_query) VALUES (?, ?, ?, ?, ?)", (column_name, column_description, column_type, question, json.dumps(search_queries)))
     conn.commit()
     conn.close()
+
+def add_new_document(doc_id, doc_bin, db_name='indexis.db', vec_db_name='faiss_c512_o128.index', chunk_size=512, chunk_overlap=128, num_docs=3, model=None):
+    if model is None:
+        get_llm()
+    
+    # get the document id and other metadata
+    doc_txt = pdf_bin_to_text(doc_bin)
+    doc_id = re.search(r'תכנית מס\' ([0-9]{3}-[0-9]{7}|[^\n]+)', doc_txt.split('\n')[2]).group(1)
+    doc_metadata = extract_xplan_attributes(doc_id)
+    os.makedirs(f'{ROOT_PATH}/out/{doc_id}', exist_ok=True)
+    doc_bin.save(f'{ROOT_PATH}/out/{doc_id}/{doc_bin.filename}')
+    
+    # create a new vector db for the document
+    embedding_model = get_embedding_model()
+    documents = clean_and_split(doc_txt, doc_id, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    pl_vec_db = FAISS.from_documents(documents, embedding_model)
+    doc_values = {}
+    with sqlite3.connect(f"{ROOT_PATH}/{db_name}") as conn:
+        required_columns = conn.execute("SELECT * FROM columns WHERE search_query IS NOT NULL").fetchall()
+        
+        for name, type, desc, question, queries in required_columns:
+            # get the answer for the question
+            parser = {
+                'TEXT': TextualOutputParser,
+                'FLOAT': NumericOutputParser,
+                'BOOLEAN': BooleanOutputParser,
+                'TIMESTAMP': DateOutputParser
+            }[type]()
+            
+            
+            chunks = get_top_k(json.loads(queries), pl_vec_db, doc_id, k=num_docs)
+            res = get_answer(question, chunks, model, parser)
+            converted_res = {
+                'TEXT': str,
+                'FLOAT': float,
+                'BOOLEAN': bool,
+                'TIMESTAMP': datetime.fromtimestamp
+            }[type](res)
+            doc_values[name] = converted_res
+        cols_titles = ['id', 'name', 'receiving_date', 'approval_date', 'status'] + list(doc_values.keys())
+
+        cols_values = [doc_id, doc_metadata['pl_name'], doc_txt, doc_metadata['receiving_date']*1e6] + list(doc_values.values())
+        vals_placeholder = ', '.join(['?']*len(cols_titles))
+        conn.execute(f"INSERT INTO plans ({', '.join(cols_titles)}) VALUES ({vals_placeholder})", cols_values)
+        conn.commit()
+        # marge vector store with the main vector store
+    vec_db = FAISS.load_local(f"{ROOT_PATH}/{vec_db_name}")
+    vec_db.merge_from(pl_vec_db)
+    vec_db.save_local(f"{ROOT_PATH}/{vec_db_name}")
 
 # Define the function that determines whether to continue or not
 def should_continue(messages):
@@ -106,8 +163,6 @@ def should_continue(messages):
         return END
     else:
         return "action"
-
-create_col_mutex = Lock()
 
 @tool
 def query_document(document_id:str, query:str)->str:
@@ -196,6 +251,7 @@ def create_column(column_name, column_description, parser, config: RunnableConfi
         sql_db_name = config.get("configurable", {}).get("sql_db", "indexis.db")
         vec_db_name = config.get("configurable", {}).get("vec_db", "faiss_c512_o128.index")
         num_docs = config.get("configurable", {}).get("num_docs", 3)
+        num_queries = config.get("configurable", {}).get("num_queries", 1)
         conversation_id = config.get("configurable", {}).get("conversation_id", "1")
         llm = get_llm(model_name)
         conn = sqlite3.connect(sql_db_name)
@@ -203,12 +259,12 @@ def create_column(column_name, column_description, parser, config: RunnableConfi
         db = get_db(data, vec_db_name) # generate a question from the column description
         question = question_from_description(column_description, answer_parser=parser, model=llm)
 
-        search_query = query_from_description(column_description, model=llm)
+        search_queries = queries_from_description(column_description, model=llm, num_queries=num_queries)
 
         logger.info(f"create_column: {column_name}, description: {column_description}, question: {question}")
         
         index = pd.read_sql(f"SELECT id FROM plans_{conversation_id}", conn)
-        res = pd.DataFrame(get_answer_foreach_doc(question, db, index['id'],num_docs=num_docs, model=llm, multiprocess=False, parser=parser, full_doc=False, query=search_query))[['id', 'value']]
+        res = pd.DataFrame(get_answer_foreach_doc(question, db, index['id'],num_docs=num_docs, model=llm, multiprocess=False, parser=parser, full_doc=False, queries=search_queries))[['id', 'value']]
 
         # remove rows with None values
         # remove rows with null values
@@ -222,7 +278,7 @@ def create_column(column_name, column_description, parser, config: RunnableConfi
         
         # insert the results into the new column in plans table
         try:
-            insert_new_column(column_name, parser.get_type(), column_description, res.to_dict(orient='records'), question, search_query, db_name=sql_db_name, table_name=f"plans_{conversation_id}", col_table_name=f"columns_{conversation_id}")
+            insert_new_column(column_name, parser.get_type(), column_description, res.to_dict(orient='records'), question, search_queries, db_name=sql_db_name, table_name=f"plans_{conversation_id}", col_table_name=f"columns_{conversation_id}")
             # conn.execute(f"ALTER TABLE plans_{conversation_id} ADD COLUMN {column_name} {parser.get_type()}")
             # conn.execute(f"INSERT INTO columns_{conversation_id} (name, type, description) VALUES ('{column_name}', '{parser.get_type()}', '{column_description}')")
             # conn.executemany(f"UPDATE plans_{conversation_id} SET {column_name} = ? WHERE id = ?", res[['value', 'id']].to_records(index=False))
@@ -402,7 +458,7 @@ def agentic_question_ansewr(question, db, doc_id, llm):
     
     thread = {
         "configurable": {
-            "thread_id": "2",
+            "thread_id": doc_id,
             "system_message": """
                 Using the information contained in your knowledge base about urban construction plan, which you can access with the 'retriever' tool,
                 give an answer to the question below. 

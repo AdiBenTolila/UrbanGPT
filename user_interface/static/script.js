@@ -52,7 +52,6 @@ function append_message(message, type, conversation_id, message_id=undefined) {
         // escape _ in message_text
         message_text = message_text.replace(/_/g, '\\_');
         let message_text_html = md2html_converter.makeHtml(message_text);
-        // messageElement.innerHTML = `<table id="table-${obj.id}"><tr><td class="icon-td"><img src="static/source_icon.png"></td><td><span>${message}</span></td></tr></table>`;
         messageElement.innerHTML = `<table id="table-${message.id}">
                                         <tr>
                                             <td>
@@ -61,16 +60,16 @@ function append_message(message, type, conversation_id, message_id=undefined) {
                                             <td class="icon-td">
                                                 <img src="static/source_icon.png">
                                             </td>
-
                                         </tr>
                                         <tr>
                                             <td id="result-${message.id}">
-                                                <span class="loader"></span>
+                                                <div class="spinner-border" role="status">
+                                                    <span class="visually-hidden">Loading...</span>
+                                                </div>
                                             </td>
                                             <td class="icon-td">
                                                 <img src="static/source_icon.png">
                                             </td>
-
                                         </tr>
                                     </table>`;
     }else if(type === 'tool_message') {
@@ -86,10 +85,11 @@ function append_message(message, type, conversation_id, message_id=undefined) {
         return;
     }
     chatContainer.appendChild(messageElement);
+    chatContainer.scrollTo(0, chatContainer.scrollHeight);
 }
 
 function create_new_chat(chat_id, title, from_new=false) {
-    if (title === undefined) {
+    if (title === undefined || title === '' || title === null) {
         title = 'צ\'אט חדש';
     }
     let chat = document.createElement('div');
@@ -112,6 +112,26 @@ function create_new_chat(chat_id, title, from_new=false) {
 
     const li = document.createElement('li');
     li.textContent = title;
+    delete_button = document.createElement('button');
+    delete_button.className = 'btn btn-danger w-auto delete-chat';
+    delete_button.innerHTML = '<i class="fas fa-trash-alt"></i>';
+    delete_button.addEventListener('click', function(e) {
+        e.stopPropagation();
+        fetch(`/chat?conversation_id=${chat_id}`, {
+            method: 'DELETE'
+        }).then(response => response.json())
+        .then(data => {
+            if (data.status === 'ok') {
+                const chat = document.getElementById(`chat-${chat_id}`);
+                chat.remove();
+                const chatLI = document.querySelector(`#chatList li[data-conversation-id="${chat_id}"]`);
+                chatLI.remove();
+            } else {
+                console.error(`Failed to delete chat: ${data.message}`);
+            }
+        }).catch(error => console.error('Error:', error));
+    }); 
+    li.appendChild(delete_button);
     li.setAttribute('data-conversation-id', chat_id);
     li.addEventListener('click', function(e) {
         display_chat(e.target.getAttribute('data-conversation-id'))
@@ -122,7 +142,8 @@ function create_new_chat(chat_id, title, from_new=false) {
 }
 
 function display_chat(chat_id) {
-    console.log(`Displaying chat ${chat_id}`);
+    $(".message-input-container").removeClass("d-none")
+    $(".chat-placeholder").hide()
     if (chat_id === 'new') {
         currentChat = undefined;
     }else {
@@ -135,7 +156,8 @@ function display_chat(chat_id) {
     let chat = document.getElementById(`chat-${chat_id}`);
     if (!chat) {
         console.error('Chat not found');
-        chat = create_new_chat(chat_id);
+        // chat = create_new_chat(chat_id);
+        return;
     }
     chat.classList.add('active');
 
@@ -193,7 +215,8 @@ function handleMessage(data) {
             append_message(tool_call, 'tool_call', conversation_id);
         });
     } else if (type === 'tool') {
-        append_message({result: content, tool_call_id}, 'tool_message', conversation_id);
+        console.log("tool_message", JSON.parse(message));
+        append_message({result: content, tool_call_id: tool_call_id}, 'tool_message', conversation_id);
     }else if (type === 'AIMessageChunk') {
         const messageElement = document.querySelector(`#chat-${conversation_id} #${message_id}`);
         if (messageElement) {
@@ -235,26 +258,6 @@ function newChat() {
     display_chat('new');
 }   
 
-// function filterCheckboxes() {
-//     var input, filter, div, labels, i, txtValue, selectAll;
-//     input = document.getElementById('searchBox');
-//     filter = input.value.toUpperCase();
-//     div = document.getElementById('documentsCheckboxes').querySelector('.checkbox-container');
-//     labels = div.getElementsByTagName('label');
-//     selectAll = document.getElementById('selectAll');
-
-//     for (i = 0; i < labels.length; i++) {
-//         txtValue = labels[i].textContent || labels[i].innerText;
-//         console.log(txtValue + ' ' + filter);
-//         if (txtValue.toUpperCase().indexOf(filter) > -1) {
-//             labels[i].parentElement.style.display = "";
-//         } else {
-//             labels[i].parentElement.style.display = "none";
-//         }
-//     }
-//     selectAll.checked = false;
-// }
-
 function toggleSelectAll() {
     const checkboxes = document.querySelectorAll('.checkbox-button');
     const selectAll = document.getElementById('selectAll');
@@ -289,7 +292,6 @@ function filterCheckboxes() {
                     match = false;
                 }
             } else if (type === 'BOOLEAN') {
-                console.log(value, criteria);
                 if (value.toLowerCase() !== criteria) {
                     match = false;
                 }
@@ -356,8 +358,8 @@ function updateCriteriaInput() {
                 <input type="date" id="maxCriteria" class="form-control">
             </div>
         `;
-    } else {
-        console.error('Invalid type');
+    } else if (type != null) {
+        console.error(`Invalid type ${type}`);
     }
 }
 
@@ -451,9 +453,9 @@ function initSettingsModal(){
 }
 
 function setElementValue(elementId, value) {
-    console.log(elementId, value);
     document.getElementById(elementId).innerHTML = value;
 }
+
 function editRow(docId) {
     const row = document.getElementById(`row-${docId}`);
     row.querySelectorAll('.editable-cell').forEach(cell => {
@@ -527,59 +529,26 @@ function downloadDocument(docId) {
     }).then(response => response.blob())
 }
 
-function addColumn(col_name, col_desc, col_type, model, num_docs, is_full_doc) {
+function addColumn(col_name, col_desc, col_type, model, num_docs, is_full_doc, num_queries) {
     fetch('/column', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
         },
-        body: JSON.stringify({name: col_name, description: col_desc, type: col_type, model: model, num_retrieval_docs: num_docs, is_full_doc: is_full_doc})
+        body: JSON.stringify({name: col_name, description: col_desc, type: col_type, model: model, num_retrieval_docs: num_docs, is_full_doc: is_full_doc, num_queries: num_queries})
     }).then(response => response.json())
     .then(data => {
         if (data.status === 'ok') {
             $('#addColumnModal').css('display', 'none');
             console.log('Column added successfully');
             location.reload();
-            // const table = document.getElementById('documentsTable');
-            // const header = table.querySelector('thead tr');
-            // const newCol = document.createElement('th');
-            // newCol.innerText = col_name;
-            // del_col_btn = document.createElement('button');
-            // del_col_btn.className = 'btn btn-danger';
-            // del_col_btn.setAttribute('data-toggle', 'tooltip');
-            // del_col_btn.setAttribute('title', 'Delete Column');
-            // del_col_btn.innerHTML = '<i class="fas fa-trash"></i>';
-            // del_col_btn.addEventListener('click', function() {
-            //     deleteColumn(col_name);
-            // });
-            // newCol.appendChild(del_col_btn);
-
-            // // add new column at the end of the table, before the last column
-            // header.insertBefore(newCol, header.children[header.children.length - 1]);
-            // data.data.forEach(item => {
-            //     const escaped_id = CSS.escape(item.id);
-            //     const row = table.querySelector(`#row-${escaped_id}`);
-            //     if (!row) {
-            //         console.error(`Row with id ${escaped_id} not found`);
-            //         return;
-            //     }
-            //     // <td class="editable-cell" data-column="{{ column }}">{{ doc[column] }}</td>
-            //     const cell = document.createElement('td');
-            //     cell.className = 'editable-cell';
-            //     cell.setAttribute('data-column', col_name);
-            //     cell.setAttribute('data-type', col_type);
-
-            //     cell.innerText = item.answer;
-            //     row.insertBefore(cell, row.children[row.children.length - 1]);
-            // });
-            // const rows = table.querySelectorAll('tbody tr');
-            // rows.forEach(row => {
-            //     const cell = document.createElement('td');
-            //     cell.innerText = '';
-            //     row.insertBefore(cell, row.children[row.children.length - 1]);
-            // });
         } else {
-            console.error('Failed to add column');
+            console.error(`Failed to add column: ${data.message}`);
+            // TODO show error message
+            $('#addColumnForm').find('button[type="submit"]').html('הוסף עמודה');
+            $('#addColumnForm').find('input, select, textarea').prop("disabled", false);
+            $('#addColumnForm').find('.alert').removeClass('d-none');
+            $('#addColumnForm').find('.alert').text(data.message);
         }
     }).catch(error => console.error('Error:', error));
 }
@@ -594,22 +563,45 @@ function deleteColumn(col_name) {
     }).then(response => response.json())
     .then(data => {
         if (data.status === 'ok') {
-            console.log('Column deleted successfully');
             const table = document.getElementById('documentsTable');
             const header = table.querySelector('thead tr');
-            const colIndex = [...header.children].findIndex(col => col.innerText === col_name);
+            const colIndex = [...header.children].findIndex(col => col.innerText.trim() === col_name);
             header.removeChild(header.children[colIndex]);
             const rows = table.querySelectorAll('tbody tr');
             rows.forEach(row => {
                 row.removeChild(row.children[colIndex]);
             });
         } else {
-            console.error('Failed to delete column');
+            console.error(`Failed to delete column: ${data.message}`);
         }
     }).catch(error => console.error('Error:', error));
 }
 
-function onLoad() {    
+function deleteContactMessage(message_id) {
+    fetch('/contact', {
+        method: 'DELETE',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({id:message_id})
+    }).then(response => response.json())
+    .then(data => {
+        if (data.status === 'ok') {
+            // refresh page
+            location.reload();
+        } else {
+            console.error(`Failed to delete message: ${data.message}`);
+        }
+    }
+    ).catch(error => console.error('Error:', error));
+}
+
+function setAboutEditing() {
+    $("#aboutText").hide();
+    $("#aboutEdit").show();
+}
+
+function onLoad() {
     // Event listener for opening modal
     const modalBtns = document.querySelectorAll('[data-toggle="modal"]');
     for(const btn of modalBtns){
@@ -642,7 +634,7 @@ function onLoad() {
             }
         });
     });
-    
+    $(".loader-container").hide();
 }
 
 function onLoadIndex() {
@@ -664,7 +656,7 @@ function onLoadIndex() {
     fetch('/get_conversations').then(response => response.json())
     .then(data => {
         data.forEach(conversation => {
-            const chat = create_new_chat(conversation.id, conversation.title, false);
+            const chat = create_new_chat(conversation.id, conversation.title);
             chats[conversation.id] = {messages: conversation.messages, title: conversation.title};
             for (const message of conversation.messages) {
                 const { type, content, tool_calls, tool_call_id } = JSON.parse(message);
@@ -742,10 +734,10 @@ function onLoadIndex() {
         settingModal.style.display = 'none';
     });
     
-    const clearDataBtn = document.getElementById('clearDataBtn');
-    clearDataBtn.addEventListener('click', function() {
-        fetch('/clear_data').catch(error => console.error('Error:', error));
-    });
+    // const clearDataBtn = document.getElementById('clearDataBtn');
+    // clearDataBtn.addEventListener('click', function() {
+    //     fetch('/clear_data').catch(error => console.error('Error:', error));
+    // });
 
 
     // Event listener for sending a new chat message
@@ -765,24 +757,37 @@ function onLoadDashboard() {
     onLoad();
     $('[data-toggle="tooltip"]').tooltip();
     $('[data-toggle2="tooltip"').tooltip();
+    $('#is_full_doc').change((e)=>{
+        if (e.target.checked){
+            $('#num_chunks_input_group').hide()
+            // $('#num_retrieval_docs')
+        }else{
+            $('#num_chunks_input_group').show()
+        }
+    });
     $('#addColumnForm').submit(function(e) {
         e.preventDefault();
-        $('#addColumnForm').find('button[type="submit"]').html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Uploading...');
-
         const col_name = document.getElementById('column_name');
         const col_desc = document.getElementById('column_description');
         const col_type = document.getElementById('column_type');    
         const model = document.getElementById('model_name');
         const num_docs = document.getElementById('num_retrieval_docs');
         const is_full_doc = document.getElementById('is_full_doc');
+        const num_queries = document.getElementById('num_queries');
 
-        addColumn(col_name.value, col_desc.value, col_type.value, model.value, num_docs.value, is_full_doc.checked);
-        col_name.value = '';
-        col_desc.value = '';
-        col_type.value = 'text';
-        model.value = '';
-        num_docs.value = '';
-        is_full_doc.checked = false;
+        const columnNameRegex = /^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/;
+
+        if (!columnNameRegex.test(col_name.value)) {
+            // Show alert message
+            columnAlert.textContent = 'Invalid column name. Column name must start with a letter, contain only letters, numbers, and underscores, and be at most 63 characters long.';
+            columnAlert.classList.remove('d-none');
+            columnAlert.classList.add('alert-danger');
+        } else {
+            columnAlert.classList.add('d-none');
+            $('#addColumnForm').find('button[type="submit"]').html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> יוצר עמודה...');
+            $('#addColumnForm').find('input, select, textarea').prop("disabled", true);    
+            addColumn(col_name.value, col_desc.value, col_type.value, model.value, num_docs.value, is_full_doc.checked, num_queries.value);
+        }
     });
     $('#uploadDocumentForm').submit(function(e) {
         e.preventDefault();
@@ -799,26 +804,6 @@ function onLoadDashboard() {
             if (data.success) {
                 location.reload();
 
-                // console.log('Document added successfully');
-                // const table = document.getElementById('documentsTable');
-                // const newRow = table.insertRow(-1);
-                // newRow.id = `row-${CSS.escape(data.doc_id)}`;
-                // // TODO: add document to table
-                // const columns = [...table.querySelector('thead tr').children].slice(0, -1);
-                // const col_names = columns.map(col => col.innerText.trim());
-                // const col_types = columns.map(col => col.getAttribute('data-type'));
-                // for (let i = 0; i < col_names.length; i++) {
-                //     const cell = newRow.insertCell(-1);
-                //     if (col_types[i] === 'TIMESTAMP') {
-                        
-                //         cell.innerText = new Date(data.data[col_names[i]]/1000).toLocaleString();
-                //     }else {
-                //         cell.innerText = data.data[col_names[i]];
-                //     }
-                //     cell.className = 'editable-cell';
-                //     cell.setAttribute('data-column', col_names[i]);
-                //     cell.setAttribute('data-type', col_types[i]);
-                // }                
             } else {
                 console.error('Failed to add document');
             }

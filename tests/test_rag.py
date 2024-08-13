@@ -97,12 +97,12 @@ def test_get_answer_from_description(init_data, description, ground_truth, doc_i
     # assert the answer is correct
     assert llm_verify_answer(question, ground_truth, answer, llm), f"The model answer is {answer} which is incompetable with {ground_truth}."
 
-def test_full_context_chat(init_data):
-    llm = get_llm("openai-gpt-4o-mini")
-    data = init_data['df'][['id', 'content']]
+# def test_full_context_chat(init_data):
+#     llm = get_llm("openai-gpt-4o-mini")
+#     data = init_data['df'][['id', 'content']]
     
-    # res = stream_chat(data,[HumanMessage("כמה דירות חדשות תוכננו בשנת 2021?")], llm)
-    # assert res==0, f"The context length is {res}."
+#     res = stream_chat(data,[HumanMessage("כמה דירות חדשות תוכננו בשנת 2021?")], llm)
+#     assert res==0, f"The context length is {res}."
 
 if __name__ == '__main__':
     pytest.main([__file__, '--log-level=INFO', '--log-format="%(asctime)s - %(levelname)s - %(message)s"', f'--log-file=out/{date}/log.txt'])

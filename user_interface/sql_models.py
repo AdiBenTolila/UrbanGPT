@@ -60,3 +60,20 @@ class ConversationConfig(db.Model):
     
     def __repr__(self) -> str:
         return f"ConversationConfig('{self.conversation_id}', '{self.key}', '{self.value}')"
+
+class ContactMessage(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(20), nullable=False)
+    email = db.Column(db.String(120), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    timestamp = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    
+    def __repr__(self) -> str:
+        return f"ContactMessage('{self.name}', '{self.email}', '{self.content}')"
+
+class SystemConfig(db.Model):
+    key = db.Column(db.String(20), primary_key=True)
+    value = db.Column(db.JSON, nullable=False)
+    
+    def __repr__(self) -> str:
+        return f"SystemConfig('{self.key}', '{self.value}')"

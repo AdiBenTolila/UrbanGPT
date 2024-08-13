@@ -13,7 +13,7 @@ import os
 import re
 import pandas as pd
 from datetime import datetime
-from sql_models import db as app_db, User, Conversation, UserConfig, ConversationMessage, AnonymousUser, ConversationConfig
+from sql_models import db as app_db, User, Conversation, UserConfig, ConversationMessage, AnonymousUser, ConversationConfig, ContactMessage,SystemConfig
 
 root_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.append(root_path)
@@ -27,6 +27,7 @@ from RAG import (get_db,
                 stream_chat,
                 question_from_description,
                 query_from_description,
+                queries_from_description,
                 BatchCallback,
                 TextualOutputParser,
                 NumericOutputParser, 
@@ -40,6 +41,8 @@ from download_program_doc import extract_xplan_attributes
 dotenv.load_dotenv()
 logger = logging.getLogger(__name__)
 curr_time = datetime.now().strftime("%Y-%m-%d_%H-%M")
+if not os.path.exists('logs'):
+    os.makedirs('logs')
 logging.basicConfig(filename=f'logs/{curr_time}_flask.log', level=logging.DEBUG)
 
 app = Flask(__name__)
@@ -53,7 +56,8 @@ login_manager.anonymous_user = AnonymousUser
 sql_db_name = os.environ.get("SQL_DB", "indexis.db")
 vec_db_name = os.environ.get("VEC_DB", "faiss_c512_o128.index")
 
-vec_db = get_db([], f"{root_path}/{vec_db_name}", chunk_size=app.config.get('CHUNK_SIZE', 512), chunk_overlap=app.config.get('CHUNK_OVERLAP', 128))
+data = pd.read_csv("shpan.csv")
+vec_db = get_db(data, f"{root_path}/{vec_db_name}", chunk_size=app.config.get('CHUNK_SIZE', 512), chunk_overlap=app.config.get('CHUNK_OVERLAP', 128))
 logger.info("vector db loaded")
 # create plans database if it doesn't exist
 with sqlite3.connect(f"{root_path}/{sql_db_name}") as conn:
@@ -138,19 +142,47 @@ def logout():
     logout_user()
     return redirect(url_for('index'))
 
-@app.route('/about')
+@app.route('/about', methods=['GET', 'POST'])
 def about():
-    return render_template('about.html', user=current_user)
+    about_config = SystemConfig.query.filter_by(key='about').first()
+    if request.method == 'POST':
+        about_text = request.form.get('about_text')
+        if about_config:
+            about_config.value = about_text
+        else:
+            about_config = SystemConfig(key='about', value=about_text)
+            app_db.session.add(about_config)
+        app_db.session.commit()
+        return render_template('about.html', user=current_user, about_text=about_text)
+    if about_config:
+        about_text = about_config.value
+    else:
+        about_text = "UrbanGPT הוא כלי מהפכני שבא לתת מענה לבעית תכנון הבינוי העירוני."
 
-@app.route('/contact', methods=['GET', 'POST'])
+    return render_template('about.html', user=current_user, about_text=about_text)
+
+@app.route('/contact', methods=['GET', 'POST', 'DELETE'])
 def contact():
     if request.method == 'POST':
+        name = request.form.get('name')
         email = request.form.get('email')
         message = request.form.get('message')
         # send email to the admin
-        # TODO send message to the admin
+        new_message = ContactMessage(name=name, email=email, content=message)
+        app_db.session.add(new_message)
+        app_db.session.commit()
         flash('Your message has been sent', 'success')
-    return render_template('contact.html', user=current_user)
+        return redirect(url_for('contact'))
+    elif request.method == 'DELETE':
+        id = request.json.get('id')
+        ContactMessage.query.filter_by(id=id).delete()
+        app_db.session.commit()
+        return jsonify({'status': 'ok'})
+    elif request.method == 'GET':
+        if current_user.is_authenticated and current_user.permission == 'admin':
+            messages = ContactMessage.query.all()
+            return render_template('contact.html', user=current_user, messages=messages)
+        return render_template('contact.html', user=current_user)
 
 @app.route('/available_plans')
 def available_plans():
@@ -163,156 +195,15 @@ def available_plans():
 def available_models():
     return jsonify(list(model_map.keys()))
 
-# @app.route('/ask/<doc_id>', methods=['POST'])
-# def ask(doc_id=None):
-#     # get db subset for the requested doc_id
-#     question = request.get_json()['question']
-#     num_rephrasings = request.get_json().get('num_rephrasings', _get_attr('num_rephrasings',0))
-#     num_chunks = request.get_json().get('num_chunks', _get_attr('num_chunks',3))
-#     questions = diffrent_question_rephrasing(question, k=num_rephrasings)
-#     llm = get_llm(_get_attr('model'))
-#     conversation = Conversation(user_id=current_user.id, title=f"{title} - {doc_id}")
-#     title = title_from_quary(question, llm)
-#     chunks = get_top_k_by_count(questions, vec_db, k=num_chunks, pl_number=doc_id)
-#     output = get_answer(question,chunks, llm)
-#     sources = [ConversationMessage(conversation_id=conversation.id, sender="source", content=message_to_json(chunk)) for chunk in chunks]
-#     message = ConversationMessage(conversation_id=conversation.id, sender="ai", content=message_to_json(output))
-#     app_db.session.add(conversation)
-#     app_db.session.add_all(sources)
-#     app_db.session.add(message)
-#     app_db.session.commit()
-#     return jsonify({'message': output, 'sources': chunks, 'conversation_id': conversation.id})
-
-# @app.route('/ask_context', methods=['GET', 'POST'])
-# def ask_context():
-#     if request.method == 'POST':
-#         # create a new conversation with the given documents and model
-#         conversation = Conversation(user_id=current_user.id)
-#         app_db.session.add(conversation)
-#         app_db.session.commit()
-#         for key, value in request.get_json().items():
-#             config = ConversationConfig(conversation_id=conversation.id, key=key, value=json.dumps(value))
-#             app_db.session.add(config)
-#         app_db.session.commit()
-#         return jsonify({'conversation_id': conversation.id})
-#     elif request.method == 'GET':
-#         # ask a question in the context of the given conversation
-#         question = request.args.get('question')
-#         conversation_id = request.args.get('conversation_id')
-#         conversation = Conversation.query.filter_by(id=conversation_id).first()
-#         if conversation is None or current_user.id != conversation.user_id:
-#             print(current_user.id, "is not the owner of the conversation, the owner is", conversation.user_id)
-#             return f"event: error\ndata: {json.dumps({'error': 'conversation not found'})}\n\nevent: end\n\n"
-#         model_name = ConversationConfig.query.filter_by(conversation_id=conversation_id, key='model').first().value
-#         documents = json.loads(ConversationConfig.query.filter_by(conversation_id=conversation_id, key='documents').first().value)
-#         llm = get_llm(model_name)
-#         if conversation.title is None:
-#             conversation.title = title_from_quary(question, llm)
-#             app_db.session.add(conversation)
-#             app_db.session.commit()
-#         conversation_messages = ConversationMessage.query.filter_by(conversation_id=conversation_id).order_by(ConversationMessage.timestamp).all()
-#         messages = [HumanMessage(m.content) if m.sender=="human" else AIMessage(m.content) for m in conversation_messages] + [HumanMessage(question)]
-#         msg = ConversationMessage(conversation_id=conversation.id, sender="human", content=question)
-#         app_db.session.add(msg)
-#         app_db.session.commit()
-        
-#         conn = sqlite3.connect(f"{root_path}/{sql_db_name}")
-#         data = pd.read_sql("SELECT id, content FROM plans WHERE id IN (?)", conn, params=(", ".join(documents),))
-#         @stream_with_context
-#         def stream_chat_json(messages, data, llm):
-#             whole_message = ""
-#             for message in stream_chat(data, messages, llm):
-#                 whole_message += message.content
-#                 msg = {'conversation_id':conversation.id,
-#                         'title':conversation.title,
-#                         'message_id':message.id,
-#                         'message':message.content,
-#                         'mode': 'chat'}
-#                 yield f"event: message\ndata: {json.dumps(msg)}\n\n"
-#             conversation_message = ConversationMessage(conversation_id=conversation.id, sender=message.type, content=whole_message)
-#             app_db.session.add(conversation_message)
-#             app_db.session.commit()
-#             yield f"event: end\n\n"
-#         return Response(stream_chat_json(messages, data[:2], llm), content_type='text/event-stream')
-#     else:
-#         return jsonify({'error': 'method not allowed'})
-
-# @app.route('/ask_foreach', methods=['POST'])
-# def ask_foreach():
-#     question = request.get_json()['question']
-#     num_rephrasings = request.get_json().get('num_rephrasings', _get_attr('num_rephrasings',0))
-#     num_chunks = request.get_json().get('num_chunks', _get_attr('num_chunks',3))
-    
-#     conn = sqlite3.connect(f"{root_path}/{sql_db_name}")
-#     data = pd.read_sql("SELECT * FROM plans", conn)
-#     title = title_from_quary(question, get_llm(_get_attr('model')))
-#     conversation = Conversation(user_id=current_user.id, title=title)
-#     message = ConversationMessage(conversation_id=conversation.id, sender="human", content=message_to_json(HumanMessage(question)))
-#     answers = pd.DataFrame(get_answer_foreach_doc(question, vec_db, data['id'], num_rephrasings=num_rephrasings, num_docs=num_chunks))
-#     answer_message = ConversationMessage(conversation_id=conversation.id, sender="ai", content=message_to_json(answers.to_dict(orient='records')))
-#     app_db.session.add(conversation)
-#     app_db.session.add(message)
-#     app_db.session.add(answer_message)
-#     app_db.session.commit()
-    
-#     return jsonify({'columns': answers.columns.tolist(), 'data': answers.to_dict(orient='records'), "conversation_id": conversation.id})
-
-# @app.route('/ask_agent', methods=['GET', 'POST'])
-# def ask_agent():
-#     # on post, create a new empty conversation
-#     if request.method == 'POST':
-#         conversation = Conversation(user_id=current_user.id)
-#         app_db.session.add(conversation)
-#         app_db.session.commit()
-#         for key, value in request.get_json().items():
-#             config = ConversationConfig(conversation_id=conversation.id, key=key, value=json.dumps(value))
-#             app_db.session.add(config)
-#         app_db.session.commit()
-#         return jsonify({'conversation_id': conversation.id})
-
-#     # on get, ask a question in the context of the given conversation
-#     if request.method == 'GET':
-#         question = request.args.get('question')
-#         model_name = _get_attr('model')
-#         rag_llm_name = _get_attr('doc_llm')
-#         os.environ['MODEL_NAME'] = rag_llm_name
-#         llm = get_llm(model_name)
-#         if "conversation_id" in request.args:
-#             conversation_id = request.args.get('conversation_id')
-#             conversation = Conversation.query.filter_by(id=conversation_id).first()
-#             if conversation is None or current_user.id != conversation.user_id:
-#                 print(current_user.id, "is not the owner of the conversation, the owner is", conversation.user_id)
-#                 return jsonify({'error': 'conversation not found'})
-#             messages = ConversationMessage.query.filter_by(conversation_id=conversation_id).all().order_by(ConversationMessage.timestamp)
-#         else:
-#             title = title_from_quary(question, llm)
-#             conversation = Conversation(user_id=current_user.id, title=title)
-#             app_db.session.add(conversation)
-#             app_db.session.commit()
-#             messages = []
-#         agent = get_agent(llm, get_tools())
-#         logger.info(f"historical messages sequence: {' -> '.join([type(m).__name__ for m in messages])}")
-#         @stream_with_context
-#         def stream_agent_json(agent, system_message, question, agent_id, history):
-#             for message in stream_agent(agent, system_message, question, agent_id, history):
-#                 serialized_message = message_to_json(message)
-#                 conversation_message = ConversationMessage(conversation_id=conversation.id, sender=message.type, content=serialized_message)
-#                 app_db.session.add(conversation_message)
-#                 app_db.session.commit()
-#                 yield f"event: message\ndata: {json.dumps({'conversation_id':conversation.id, 'title':conversation.title, 'message':serialized_message, 'mode': 'agent'})}\n\n"
-#             yield f"event: end\n\n"
-#         deserialised_history = [json_to_message(m.content) for m in app_db.session.query(ConversationMessage.content).filter_by(conversation_id=conversation.id).all()]
-#         system_message = _get_attr('system_message')
-#         return Response(stream_agent_json(agent, system_message, question, "1", deserialised_history), content_type='text/event-stream')
-
 @stream_with_context
 def json_stream_agent(llm, system_message, question, agent_id, history, conversation, **kwargs):
     agent = get_agent(llm, get_tools())
     for message in stream_agent(agent, system_message, question, agent_id, history, **kwargs):
         serialized_message = message_to_json(message)
-        conversation_message = ConversationMessage(conversation_id=conversation.id, sender=message.type, content=serialized_message)
-        app_db.session.add(conversation_message)
-        app_db.session.commit()
+        if message.type != 'human':
+            conversation_message = ConversationMessage(conversation_id=conversation.id, sender=message.type, content=serialized_message)
+            app_db.session.add(conversation_message)
+            app_db.session.commit()
         yield f"event: message\ndata: {json.dumps({'conversation_id':conversation.id, 'title':conversation.title, 'message':serialized_message, 'mode': 'agent'})}\n\n"
     yield f"event: end\n\n"
 
@@ -333,7 +224,7 @@ def json_stream_chat(data, messages, llm, conversation):
     app_db.session.commit()
     yield f"event: end\n\n"
 
-@app.route('/chat', methods=['GET', 'POST'])
+@app.route('/chat', methods=['GET', 'POST', 'DELETE'])
 def chat():
     if request.method == 'POST':
         # create a new conversation with the given documents and model
@@ -390,15 +281,13 @@ def chat():
         else:
             print("mode", mode, "is not supported")
             return jsonify({'error': 'mode not supported'})
-
-# @app.route('/submit_history', methods=['POST'])
-# def submit_history():
-#     if current_user.is_authenticated:
-#         return jsonify({'status': 'ok'})
-#     history = request.get_json()['history']
-#     session['history'] = history
-#     session.modified = True
-#     return jsonify({'status': 'ok'})
+    elif request.method == 'DELETE':
+        conversation_id = request.args.get('conversation_id')
+        Conversation.query.filter_by(id=conversation_id).delete()
+        ConversationMessage.query.filter_by(conversation_id=conversation_id).delete()
+        ConversationConfig.query.filter_by(conversation_id=conversation_id).delete()
+        app_db.session.commit()
+        return jsonify({'status': 'ok'})
 
 @app.route('/clear_data')
 @login_required
@@ -473,7 +362,7 @@ def document(doc_id=None):
         with sqlite3.connect(f"{root_path}/{sql_db_name}") as conn:
             required_columns = conn.execute("SELECT * FROM columns WHERE name NOT IN ('id', 'name', 'content', 'receiving_date')").fetchall()
             
-            for name, type, desc, question, query in required_columns:
+            for name, type, desc, question, queries in required_columns:
                 # get the answer for the question
                 parser = {
                     'TEXT': TextualOutputParser,
@@ -483,7 +372,7 @@ def document(doc_id=None):
                 }[type]()
                 
                 
-                chunks = get_top_k(query, pl_vec_db, doc_id, k=num_docs)
+                chunks = get_top_k(queries, pl_vec_db, doc_id, k=num_docs)
                 res = get_answer(question, chunks, get_llm(llm_name), parser)
                 converted_res = {
                     'TEXT': str,
@@ -539,6 +428,7 @@ def column():
         col_type = attributes['type']
         llm = get_llm(attributes.get('model', _get_attr('model')))
         num_docs = int(attributes.get('num_retrieval_docs', 3))
+        num_queries = int(attributes.get('num_queries', 1))
         is_full_doc = attributes.get('is_full_doc', False)
         question = attributes.get('question', None)
         search_query = attributes.get('search_query', None)
@@ -551,16 +441,22 @@ def column():
         if question is None:
             question = question_from_description(col_desc, answer_parser=parser, model=llm)
         if search_query is None:
-            search_query = query_from_description(col_desc, model=llm)
-
+            search_queries = queries_from_description(col_desc, model=llm, num_queries=num_queries)
+        else:
+            search_queries = [search_query]
         # conn = sqlite3.connect(sql_db_name)
         with sqlite3.connect(f"{root_path}/{sql_db_name}") as conn:
             index = pd.read_sql(f"SELECT id FROM plans", conn)
-        res = get_answer_foreach_doc(question, vec_db, index['id'],num_docs=num_docs, model=llm, multiprocess=False, parser=parser, full_doc=is_full_doc, query=search_query)
-        # add the column to the database
-        insert_new_column(col_name, parser.get_type(), col_desc, res, question=question, search_query=search_query, db_name=f"{root_path}/{sql_db_name}", table_name='plans', col_table_name='columns')
-        
-        return jsonify({'status': 'ok', 'name': col_name, 'description': col_desc, 'type': col_type, 'data': res})
+        try:
+            res = get_answer_foreach_doc(question, vec_db, index['id'],num_docs=num_docs, model=llm, multiprocess=False, parser=parser, full_doc=is_full_doc, queries=search_queries)
+            # add the column to the database
+            insert_new_column(col_name, parser.get_type(), col_desc, res, question=question, search_queries=search_queries, db_name=f"{root_path}/{sql_db_name}", table_name='plans', col_table_name='columns')
+            
+            return jsonify({'status': 'ok', 'success': True, 'name': col_name, 'description': col_desc, 'type': col_type, 'data': res})
+        except Exception as e:
+            return jsonify({'status': 'error', 'success': False, 'message':str(e)})
+            
+            
     elif request.method == 'DELETE':
         col_name = request.get_json()['name']
         with sqlite3.connect(f"{root_path}/{sql_db_name}") as conn:

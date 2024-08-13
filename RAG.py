@@ -23,12 +23,13 @@ from datetime import datetime
 import dateutil.parser as parser
 import logging
 import torch
-from dataclasses import Field, dataclass,field
+import numpy as np
 from typing import List, Dict, Any, Callable, Union
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
-def diffrent_question_rephrasing(question, k=10, model=None):
+def diffrent_question_rephrasing(question, k=3, model=None):
     if k==0:
         return [question]
     if model is None:
@@ -88,6 +89,34 @@ def query_from_description(description, model=None):
     logger.info(f"from description: {description} got query: {output}")
     return output
 
+def queries_from_description(description, model=None, num_queries=1):
+    if model is None:
+        model = get_llm()
+    if num_queries == 1:
+        prompt_template = """
+        בהינתן תיאור השדה הבא, נסח שאילתת חיפוש מתאימה.
+        תיאור: "{description}"
+        על השאילתה להיות בעברית, קצרה ומדוייקת ככל האפשר.
+        על השאילתא לא לכלול יחידות מידה או מילות מפתח שעלולות לבלבל את החיפוש ולהביא תוצאות לא רלוונטיות.
+        """
+    else:
+        prompt_template = """
+        בהינתן תיאור השדה הבא, נסח {num_queries} שאילתות חיפוש מתאימות ושונות.
+        תיאור: "{description}"
+        על השאילתות להיות בעברית, קצרות ומדוייקות ככל האפשר.
+        על השאילתות לא לכלול יחידות מידה או מילות מפתח שעלולות לבלבל את החיפוש ולהביא תוצאות לא רלוונטיות.
+        עליך לספק אך ורק שאילתות חיפוש, ללא הקדמות וללא הסברים.
+        ספק כל שאילתת חיפוש בשורה נפרדת.
+        """
+    prompt = PromptTemplate.from_template(prompt_template)
+    question_chain = prompt | model | LineListOutputParser()
+    output = question_chain.invoke(dict(description=description, num_queries=num_queries))
+    assert len(output.lines) == num_queries, f"Expected {num_queries} queries, got {len(output.lines)}"
+    # if type(output) != str:
+    #     output = output.content
+    logger.info(f"from description: {description} got query: {output}")
+    return output.lines
+
 def query_from_question(question, model=None):
     if model is None:
         model = get_llm()
@@ -123,9 +152,12 @@ def title_from_quary(query, model=None):
     logger.info(f"from query: {query} got title: {output}")
     return output
 
-def get_top_k(question, db, pl_number=None, k=3):
+def get_top_k(queries, db, pl_number=None, k=3):
+    query_vectors = [db.embeddings.embed_query(query) for query in queries]
+    average_vector = np.mean(np.array(query_vectors), axis=0).tolist()
+    assert len(average_vector) == len(query_vectors[0]), "average vector and vectors must have the same length"
     doc_filter = dict(doc_id=pl_number) if pl_number else None
-    docs = db.similarity_search(question, filter=doc_filter, fetch_k=db.index.ntotal, k=k)
+    docs = db.similarity_search_by_vector(average_vector, filter=doc_filter, fetch_k=db.index.ntotal, k=k)
     return [doc.page_content for doc in docs]
 
 def get_top_k_by_count(questions, db, pl_number=None, k=3, verbose=False):
@@ -308,31 +340,41 @@ def get_answers(questions, chunks_list, model=None, instructions=None, parser=No
         return None
     return outputs
 
-def get_answer_foreach_doc(question, db, doc_ids, num_docs=3, num_rephrasings=0, model=None, verbose=False, multiprocess=False, parser=None, full_doc=False, instructions=None, query=None, batch_size=5, callbacks=[]):
+def get_answer_foreach_doc(question, db, doc_ids, num_docs=3, num_rephrasings=0, model=None, verbose=False, multiprocess=False, parser=None, full_doc=False, instructions=None, queries=None, batch_size=3, callbacks=[]):
     if model is None:
         model = get_llm()
     if full_doc:
         docs_chunks = {doc_id:[clean_text(pdf_to_text(doc)) for doc in temp_get_docs_for_plan(doc_id)] for doc_id in doc_ids}
     else:
-        if query:
-            questions = [query]
+        if queries:
+            questions = queries
         else:
             questions = diffrent_question_rephrasing(question, k=num_rephrasings, model=model)
         if verbose:
             print(questions)
-        docs_counts = {k:{} for k in doc_ids}
-        docs_score_sum = {k:0 for k in doc_ids}
-        for q in questions:
-            res = db.similarity_search_with_score(q, k=db.index.ntotal, fetch_k=db.index.ntotal)
-            res_dict = {}
-            for doc, score in res:
-                if len(res_dict.get(doc.metadata['doc_id'], [])) < num_docs:
-                    if doc.metadata['doc_id'] in docs_counts.keys():
-                        res_dict[doc.metadata['doc_id']] = res_dict.get(doc.metadata['doc_id'], []) + [(doc, score)]
-                        docs_counts[doc.metadata['doc_id']][doc.page_content] = docs_counts[doc.metadata['doc_id']].get(doc.page_content, 0) + 1
-                        docs_score_sum[doc.metadata['doc_id']] += score
-        # sorted_docs_count = {doc_id:{chnk:cnt for chnk,cnt in sorted(count_dict.items(), key=lambda x:x[1], reverse=True)[:num_docs]} for doc_id,count_dict in docs_counts.items()}
-        docs_chunks = {doc_id:[chnk for chnk,cnt in sorted(count_dict.items(), key=lambda x:x[1], reverse=True)[:num_docs]] for doc_id,count_dict in docs_counts.items()}
+        # finging the average vector representation of the questions
+        vectors = [db.embeddings.embed_query(q) for q in questions]
+        average_vector = np.mean(np.array(vectors), axis=0).tolist()
+        assert len(average_vector) == len(vectors[0]), "average vector and vectors must have the same length"
+        docs_scores = {k:[] for k in doc_ids}
+        res = db.similarity_search_with_score_by_vector(average_vector, k=db.index.ntotal, fetch_k=db.index.ntotal)
+        for doc, score in res:
+            if doc.metadata['doc_id'] in docs_scores.keys():
+                docs_scores[doc.metadata['doc_id']] += [(doc, score)]
+        docs_chunks = {doc_id:[doc.page_content for doc,_ in sorted(docs_scores[doc_id], key=lambda x:x[1])[:num_docs]] for doc_id in doc_ids}
+        # docs_counts = {k:{} for k in doc_ids}
+        # docs_score_sum = {k:0 for k in doc_ids}
+        # for q in questions:
+        #     res = db.similarity_search_with_score(q, k=db.index.ntotal, fetch_k=db.index.ntotal)
+        #     res_dict = {}
+        #     for doc, score in res:
+        #         if len(res_dict.get(doc.metadata['doc_id'], [])) < num_docs:
+        #             if doc.metadata['doc_id'] in docs_counts.keys():
+        #                 res_dict[doc.metadata['doc_id']] = res_dict.get(doc.metadata['doc_id'], []) + [(doc, score)]
+        #                 docs_counts[doc.metadata['doc_id']][doc.page_content] = docs_counts[doc.metadata['doc_id']].get(doc.page_content, 0) + 1
+        #                 docs_score_sum[doc.metadata['doc_id']] += score
+        # # sorted_docs_count = {doc_id:{chnk:cnt for chnk,cnt in sorted(count_dict.items(), key=lambda x:x[1], reverse=True)[:num_docs]} for doc_id,count_dict in docs_counts.items()}
+        # docs_chunks = {doc_id:[chnk for chnk,cnt in sorted(count_dict.items(), key=lambda x:x[1], reverse=True)[:num_docs]] for doc_id,count_dict in docs_counts.items()}
     answers = []
     if multiprocess:
         pool = ThreadPool(multiprocess)
@@ -352,6 +394,7 @@ def get_answer_foreach_doc(question, db, doc_ids, num_docs=3, num_rephrasings=0,
         assert doc_ids is not None, "doc_ids must be provided"
         assert outputs is not None, "outputs must be provided"
         assert docs_chunks is not None, "docs_chunks must be provided"
+        logger.info(f"get_answer_foreach_doc 5")
         answers = [{
             "id": pl_num,
             "value": output,
@@ -374,10 +417,10 @@ def get_answer_foreach_doc(question, db, doc_ids, num_docs=3, num_rephrasings=0,
             #     "chunks": chunks
             # }
 
-def multiquery_retriver(question, db):
+def multiquery_retriver(question, db, doc_ids, num_docs=3, num_queries=1, model=None):
     llm = get_llm()
     retriever_from_llm = MultiQueryRetriever.from_llm(
-        retriever=db.as_retriever(), llm=llm
+        retriever=db.as_retriever(search_kwargs={"filter": {"doc_id":""}}), llm=llm
     )
     unique_docs = retriever_from_llm.get_relevant_documents(query=question)
     print("len_docs:",len(unique_docs))
@@ -440,6 +483,19 @@ class BatchCallback(BaseCallbackHandler):
     def on_chain_end(self, outputs: Dict[str, Any], run_id: UUID, parent_run_id: Union[UUID, None], tags: List[str], **kwargs):
         """Run when chain ends running."""
         self.func(outputs, run_id=run_id, tags=tags, **kwargs)
+
+# Output parser will split the LLM result into a list of queries
+class LineList(BaseModel):
+    # "lines" is the key (attribute name) of the parsed output
+    lines: List[str] = Field(description="Lines of text")
+
+class LineListOutputParser(BaseOutputParser[LineList]):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def parse(self, text: str) -> LineList:
+        lines = text.strip().split("\n")
+        return LineList(lines=lines)
 
 class BooleanOutputParser(BaseOutputParser[bool]):
     """Boolean boolean parser."""
