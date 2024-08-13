@@ -20,7 +20,8 @@ flask-sqlalchemy
 ipykernel
 sentencepiece
 bitsandbytes
-PyPDF2
+pypdf
 textract
 selenium
 faiss-cpu
+pytest

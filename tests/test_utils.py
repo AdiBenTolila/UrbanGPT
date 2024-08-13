@@ -1,8 +1,4 @@
 import pytest
-from agent import get_agent, get_tools, stream_agent, system_message, create_plans_index,agentic_question_ansewr
-from RAG import get_top_k, create_vector_from_df, BooleanOutputParser, query_from_question, get_answer, question_from_description, query_from_description
-from file_utils import get_docs_for_plan, pdf_bin_to_text, get_docs_for_plan_selenum
-from models import get_embedding_model, get_llm, get_openai_llm
 import pandas as pd
 import os
 import logging
@@ -10,8 +6,14 @@ from langchain.prompts import PromptTemplate
 from datetime import datetime
 import sqlite3
 from langchain_community.vectorstores import FAISS
-
+import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(HERE)
+sys.path.append(ROOT_DIR)
+from agent import get_agent, get_tools, stream_agent, system_message, create_plans_index,agentic_question_ansewr
+from RAG import get_top_k, create_vector_from_df, BooleanOutputParser, query_from_question, get_answer, question_from_description, query_from_description
+from file_utils import get_docs_for_plan, pdf_bin_to_text, get_docs_for_plan_selenum
+from models import get_embedding_model, get_llm, get_openai_llm
 date = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
 
 @pytest.fixture

@@ -179,6 +179,7 @@ def get_huggingface_llm(model_name):
                 max_new_tokens=2048,
                 repetition_penalty=1.03,
                 return_full_text=False,
+                token=os.environ.get("HUGGINGFACEHUB_API_TOKEN"),
             ),
             model_kwargs={"quantization_config": quantization_config},
         )

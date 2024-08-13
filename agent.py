@@ -1,7 +1,7 @@
 from langchain.agents import tool
 from langchain.agents import AgentExecutor
 from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.checkpoint.sqlite import SqliteSaver
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, MessageGraph, StateGraph
 from langgraph.prebuilt.tool_node import ToolNode
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -372,7 +372,7 @@ def get_agent(llm, tools, use_memory=True):
     # Always transition `action` -> `agent`
     workflow.add_edge("action", "agent")
     if use_memory:
-        memory = SqliteSaver.from_conn_string(":memory:") # Here we only save in-memory
+        memory = MemorySaver() # Here we only save in-memory
 
         # Setting the interrupt means that any time an action is called, the machine will stop
         app = workflow.compile(checkpointer=memory)

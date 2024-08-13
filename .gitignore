@@ -4,8 +4,9 @@ test/
 models/
 cacheModels/
 __pycache__/
-.env/
+.env
+.venv/
+.vscode/
 *.csv
-.*
 *.db
 faiss_index/
