@@ -1,39 +1,23 @@
-const selectDoc = document.getElementById('docSelect');
 const messageInput = document.getElementById('messageInput');
-const chatContainer = document.querySelector('.chat-container');
+// const chatContainer = document.querySelector('.chat-container');
 var messages_list = [];
-/*
-let selectedDoc;
-fetch('/available_plans', {
-    method: 'GET',
-    headers: {
-        'Content-Type': 'application/json'
-    }
-}).then(response => response.json())
-.then(data => {
-    data.forEach(doc => {
-        const option = document.createElement('option');
-        option.value = doc;
-        option.textContent = doc;
-        selectDoc.appendChild(option);
-    });
-})
-.catch(error => console.error('Error:', error));
-selectDoc.addEventListener('change', function() {
-    if (selectDoc.value !== 'Select a document' && selectedDoc !== selectDoc.value) {
-        selectedDoc = selectDoc.value;
-        const userMessage = document.createElement('div');
-        userMessage.className = 'chat-box user-message';
-        userMessage.innerHTML = `<table><tr><td><span>Selected document: ${selectedDoc}</span></td><td><img src="static/user-icon.jpg"></td></tr></table>`;
-        chatContainer.appendChild(userMessage);
-    }
-});
-*/
+var chats = {};
+var currentChat = undefined;
+var selectedChatMode = "agent";
+var md2html_converter = new showdown.Converter()
+md2html_converter.setOption('tables', true);
 
-function append_message(message, type) {
+function append_message(message, type, conversation_id, message_id=undefined) {
+    // html      = converter.makeHtml(text);
+
+    if (conversation_id === undefined) {
+        conversation_id = "new"
+    }
+    
+    const chatContainer = document.querySelector(`#chat-${conversation_id}`).querySelector('.chat-body');
     const messageElement = document.createElement('div');
     if(type === 'human') {
-        message = message.replace(/\n/g, '<br>');
+        message = md2html_converter.makeHtml(message);
         messageElement.className = 'chat-box user-message';
         messageElement.innerHTML = `<table>
                                         <tr>
@@ -46,7 +30,9 @@ function append_message(message, type) {
                                         </tr>
                                     </table>`;
     } else if(type === 'ai') {
-        message = message.replace(/\n/g, '<br>');
+        id_str = message_id ? `id="${message_id}"` : '';
+        // message = message.replace(/\n/g, '<br>');
+        message = md2html_converter.makeHtml(message);
         messageElement.className = 'chat-box bot-message';
         messageElement.innerHTML = `<table>
                                         <tr>
@@ -54,133 +40,200 @@ function append_message(message, type) {
                                                 <img src="static/bot_icon.png">
                                             </td>
                                             <td>
-                                                <span>${message}</span>
+                                                <span ${id_str}>${message}</span>
                                             </td>
                                         </tr>
                                     </table>`;
+        
     } else if(type === 'tool_call') {
         messageElement.className = 'chat-box source-message';
         messageElement.id = message.id;
-        // messageElement.innerHTML = `<table id="table-${obj.id}"><tr><td class="icon-td"><img src="static/source_icon.png"></td><td><span>${message}</span></td></tr></table>`;
+        let message_text = `${message.name}(${Object.entries(message.args).map(([key, value]) => `${key}=${value}`).join(', \n')})`
+        // escape _ in message_text
+        message_text = message_text.replace(/_/g, '\\_');
+        let message_text_html = md2html_converter.makeHtml(message_text);
         messageElement.innerHTML = `<table id="table-${message.id}">
                                         <tr>
+                                            <td>
+                                                <span>${message_text_html}</span>
+                                            </td>
                                             <td class="icon-td">
                                                 <img src="static/source_icon.png">
-                                            </td>
-                                            <td>
-                                                <span>${message.name}(${Object.entries(message.args).map(([key, value]) => `${key}=${value}`).join(', <br/>')})</span>
                                             </td>
                                         </tr>
                                         <tr>
+                                            <td id="result-${message.id}">
+                                                <div class="spinner-border" role="status">
+                                                    <span class="visually-hidden">Loading...</span>
+                                                </div>
+                                            </td>
                                             <td class="icon-td">
                                                 <img src="static/source_icon.png">
                                             </td>
-                                            <td id="result-${message.id}">
-                                                <span class="loader"></span>
-                                            </td>
+                                        </tr>
                                     </table>`;
     }else if(type === 'tool_message') {
-        console.log(message);
-        const toolPlaceholder = document.getElementById(`result-${message.tool_call_id}`);
-        toolPlaceholder.innerHTML = `<span>${message.result.replace(/\n/g, '<br>')}</span>`;
+        const md_message = md2html_converter.makeHtml(message.result.replace(/_/g, '\\_'));
+        const toolPlaceholder = document.querySelector(`#chat-${conversation_id} #result-${message.tool_call_id}`);
+        toolPlaceholder.innerHTML = `<span>${md_message}</span>`;
         return;
+    }else if(type === 'info') {
+        messageElement.className = 'chat-box info-message';
+        messageElement.innerHTML = `<h3>${message}</h3>`;
     }else {
         console.error('Invalid message type '+ type);
         return;
     }
     chatContainer.appendChild(messageElement);
+    chatContainer.scrollTo(0, chatContainer.scrollHeight);
 }
 
-function sendAgentMessage(){
-    const message = messageInput.value.trim();
-    if (message) {
-        fetch("/submit_history", {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({ history: messages_list })
+function create_new_chat(chat_id, title, from_new=false) {
+    if (title === undefined || title === '' || title === null) {
+        title = 'צ\'אט חדש';
+    }
+    let chat = document.createElement('div');
+    if (from_new){
+        chat = document.getElementById('chat-new')
+        chat.id = `chat-${chat_id}`
+        chat.querySelector('chat-header').innerHTML = `<h3 id=">${title}</h3>`
+
+        const newChat = document.createElement('div');
+        newChat.className = 'chat-container';
+        newChat.id = `chat-new`;
+        newChat.innerHTML = `<div class="chat-header"><h3>צ'אט חדש</h3></div><div class="chat-body"></div>`;
+        document.getElementById('chat-list').appendChild(newChat);
+    }else{
+        chat.className = 'chat-container';
+        chat.id = `chat-${chat_id}`;
+        chat.innerHTML = `<div class="chat-header"><h3>${title}</h3></div><div class="chat-body"></div>`;
+        document.getElementById('chat-list').appendChild(chat);
+    }
+
+    const li = document.createElement('li');
+    li.textContent = title;
+    delete_button = document.createElement('button');
+    delete_button.className = 'btn btn-danger w-auto delete-chat';
+    delete_button.innerHTML = '<i class="fas fa-trash-alt"></i>';
+    delete_button.addEventListener('click', function(e) {
+        e.stopPropagation();
+        fetch(`/chat?conversation_id=${chat_id}`, {
+            method: 'DELETE'
         }).then(response => response.json())
         .then(data => {
-            const eventSource = new EventSource(`/ask_agent?question=${message}`);
-            append_message(message, 'human');
-            eventSource.onmessage = function(data) {
-                handleAgentMessage(JSON.parse(data.data));
-            };
-
-            eventSource.onerror = function(event) {
-                console.error('EventSource failed:', event);
-                eventSource.close();
-            };
-            messageInput.value = '';
+            if (data.status === 'ok') {
+                const chat = document.getElementById(`chat-${chat_id}`);
+                chat.remove();
+                const chatLI = document.querySelector(`#chatList li[data-conversation-id="${chat_id}"]`);
+                chatLI.remove();
+            } else {
+                console.error(`Failed to delete chat: ${data.message}`);
+            }
         }).catch(error => console.error('Error:', error));
+    }); 
+    li.appendChild(delete_button);
+    li.setAttribute('data-conversation-id', chat_id);
+    li.addEventListener('click', function(e) {
+        display_chat(e.target.getAttribute('data-conversation-id'))
+    });
+    const chatList = document.getElementById('chatList');
+    chatList.insertBefore(li, chatList.firstChild);
+    return chat;
+}
+
+function display_chat(chat_id) {
+    $(".message-input-container").removeClass("d-none")
+    $(".chat-placeholder").hide()
+    if (chat_id === 'new') {
+        currentChat = undefined;
+    }else {
+        currentChat = chat_id;
+    }
+    const chats = document.querySelectorAll('.chat-container');
+    chats.forEach(chat => {
+        chat.classList.remove('active');
+    });
+    let chat = document.getElementById(`chat-${chat_id}`);
+    if (!chat) {
+        console.error('Chat not found');
+        // chat = create_new_chat(chat_id);
+        return;
+    }
+    chat.classList.add('active');
+
+    const chatList = document.getElementById('chatList').querySelectorAll('li');
+    const chatLI = document.querySelector(`#chatList li[data-conversation-id="${chat_id}"]`);
+    chatList.forEach(li => {
+        li.classList.remove('active');
+    });
+    if (chatLI) {
+        chatLI.classList.add('active');
     }
 }
 
 function sendMessage() {
     const message = messageInput.value.trim();
+    messageInput.value = '';
+    const conversation_id = currentChat;
+
     if (message) {
-        if (selectDoc.value === 'Select a document') {
-            fetch('/ask_general', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ question: message })
-            })
-            .then(response => response.json())
-            .then(data => displayResTable(data.columns, data.data))
-            .catch(error => console.error('Error:', error));
-        } else {
-            fetch(`/ask/${selectedDoc}`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ question: message })
-            })
-            .then(response => response.json())
-            .then(data => displayBotMessage(data.message, data.sources))
-            .catch(error => console.error('Error:', error));
-        }
+        append_message(message, 'human', conversation_id);
+        const eventSource = new EventSource(`/chat?question=${message}&conversation_id=${conversation_id}`);
+        eventSource.onmessage = function(data) {
+            handleMessage(JSON.parse(data.data));
+        };
+
+        eventSource.onerror = function(event) {
+            console.error('EventSource failed:', event);
+            eventSource.close();
+        };
         messageInput.value = '';
     }
+
 }
 
-function handleAgentMessage(data) {
-    messages_list.push(data);
-    const { type, content, tool_calls, tool_call_id } = data;
-
+function handleMessage(data) {
+    const {conversation_id, title, message_id, message, mode} = data;
+    if (currentChat === undefined) {
+        currentChat = conversation_id;
+    }
+    if (title !== undefined) {
+        // update chat title
+        const chat_title = document.querySelector(`#chat-${conversation_id} .chat-header h3`);
+        const chat_link = document.querySelector(`#chatList li[data-conversation-id="${conversation_id}"]`);
+        chat_title.innerText = title;
+        chat_link.innerText = title;        
+    }
+    const { type, content, tool_calls, tool_call_id} = JSON.parse(message);
     if (type === 'human') {
-        return;
+        // append_message(content, type, conversation_id);
     } else if (type === 'ai') {
         if (content) {
-            append_message(content, type);
+            append_message(content, type, conversation_id, message_id);
         }
         tool_calls.forEach(tool_call => {
-            append_message(tool_call, 'tool_call');
+            append_message(tool_call, 'tool_call', conversation_id);
         });
     } else if (type === 'tool') {
-        append_message({result: content, tool_call_id}, 'tool_message');
+        console.log("tool_message", JSON.parse(message));
+        append_message({result: content, tool_call_id: tool_call_id}, 'tool_message', conversation_id);
+    }else if (type === 'AIMessageChunk') {
+        const messageElement = document.querySelector(`#chat-${conversation_id} #${message_id}`);
+        if (messageElement) {
+            let txt_content = messageElement.getAttribute('data-content') || '';
+            txt_content += content;
+            messageElement.setAttribute('data-content', txt_content);
+            messageElement.innerHTML = md2html_converter.makeHtml(txt_content);
+        }else {
+            append_message(content, 'ai', conversation_id, message_id);
+        }
     }
 }
 
 function displayBotMessage(message, sources) {
-    if (sources) {
-        sources.forEach(source => {
-            const sourceMessage = document.createElement('div');
-            sourceMessage.className = 'chat-box source-message';
-            sourceMessage.innerHTML = `<table  style="display:inline"><tr><td class="icon-td"><img src="static/source_icon.png" style="margin-right: 8px; border-radius: 50%; width: 40px;"></td><td><span>${sources[i]}</span></td></tr></table>`;
-            chatContainer.appendChild(sourceMessage);
-        });
-    }
-    const botMessage = document.createElement('div');
-    botMessage.className = 'chat-box bot-message';
-    botMessage.innerHTML = `<table><tr><td class="icon-td"><img src="static/bot_icon.png"></td><td><span>${message}</span></td></tr></table>`;
-    chatContainer.appendChild(botMessage);
 }
 
-function displayResTable(cols, data) {
+function createResTable(cols, data) {
     const table = document.createElement('table');
     const headerRow = table.insertRow(-1);
 
@@ -197,124 +250,473 @@ function displayResTable(cols, data) {
             td.innerText = row[col];
         });
     });
-
-    const botMessage = document.createElement('div');
-    botMessage.className = 'chat-box bot-message';
-    botMessage.innerHTML = `<table><tr><td><img src="static/bot_icon.png"></td><td><span>Here are the results:</span></td></tr></table>`;
-    botMessage.appendChild(table);
-    chatContainer.appendChild(botMessage);
+    return table
 }
 
-function cleanChat() {
-    messages_list = [];
-    chatContainer.innerHTML = '';
-    fetch('/submit_history', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ history: messages_list })
-    }).catch(error => console.error('Error:', error));
-    append_message("ברוך הבא לUrbanGPT! תוכל לשאול אותי כל שאלה שתרצה", "ai");
+function newChat() {
+    currentChat = undefined;
+    display_chat('new');
 }   
 
-function onLoad() {
-    const newChatBtn = document.getElementById('newChatBtn');
-    const chatModeList = document.getElementById('chatModeList');
-    const editSettingBtn = document.getElementById('editSettingBtn');
-    const clearDataBtn = document.getElementById('clearDataBtn');
-    const settingModal = document.getElementById('settingsModal');
-    const closeModal = document.querySelector('.modal .close');
-    const saveSettingBtn = document.getElementById('saveSettingsBtn');
-    const chatList = document.getElementById('chatList');
-    const systemMessageTextarea = document.getElementById('systemMessage');
-    const modelSelect = document.getElementById('modelName');
-    const numRetrievalDocsInput = document.getElementById('numRetrievalDocs');
-    
-
-
-    document.querySelectorAll(".navbar-link").forEach(link => {
-        link.addEventListener('click', (e) => {
-            e.preventDefault();
-            const href = e.target.getAttribute('href');
-            const section = e.target.getAttribute('data-section');
-            document.querySelectorAll('.content-section').forEach(section => {
-                section.classList.remove('active');
-            });
-            document.querySelector(`#${section}`).classList.add('active');
-        });
+function toggleSelectAll() {
+    const checkboxes = document.querySelectorAll('.checkbox-button');
+    const selectAll = document.getElementById('selectAll');
+    checkboxes.forEach(checkbox => {
+        if (checkbox.parentElement.style.display !== 'none') {
+            checkbox.checked = selectAll.checked;
+        }
     });
+}
+let filters = [];
 
-    fetch('/available_models', {
+function filterCheckboxes() {
+    const checkboxes = document.querySelectorAll('.checkbox-button');
+    const selectAll = document.getElementById('selectAll');
+
+    checkboxes.forEach(checkbox => {
+        let match = true;
+
+        filters.forEach(filter => {
+            const { property, type, criteria } = filter;
+            const value = checkbox.getAttribute(`data-${property}`);
+            if (type === 'INTEGER' || type === 'FLOAT') {
+                const min = parseFloat(criteria.min);
+                const max = parseFloat(criteria.max);
+                const numValue = parseFloat(value);
+
+                if (isNaN(numValue) || (min && numValue < min) || (max && numValue > max)) {
+                    match = false;
+                }
+            } else if (type === 'TEXT') {
+                if (!value || !value.toLowerCase().includes(criteria.toLowerCase())) {
+                    match = false;
+                }
+            } else if (type === 'BOOLEAN') {
+                if (value.toLowerCase() !== criteria) {
+                    match = false;
+                }
+            }else if (type === 'TIMESTAMP') {
+                const min = new Date(criteria.min);
+                const max = new Date(criteria.max);
+                const dateValue = new Date(value);
+                if ((min && dateValue < min) || (max && dateValue > max)) {
+                    match = false;
+                }
+            }
+        });
+
+        checkbox.parentElement.style.display = match ? 'block' : 'none';
+    });
+    // selectAll is checked if all checkboxes are checked
+    selectAll.checked = [...checkboxes].filter(checkbox => checkbox.parentElement.style.display !== 'none').every(checkbox => checkbox.checked);
+}
+
+function updateCriteriaInput() {
+    const propertySelect = document.getElementById('property');
+    const selectedOption = propertySelect.options[propertySelect.selectedIndex];
+    const type = selectedOption.getAttribute('data-type');
+    const criteriaInputContainer = document.getElementById('criteriaInputContainer');
+
+    criteriaInputContainer.innerHTML = '';
+
+    if (type === 'INTEGER' || type === 'FLOAT') {
+        criteriaInputContainer.innerHTML = `
+            <div class="form-group">
+                <label for="minCriteria">מינימום:</label>
+                <input type="number" id="minCriteria" class="form-control" placeholder="הזן ערך מינימלי..">
+            </div>
+            <div class="form-group">
+                <label for="maxCriteria">מקסימום:</label>
+                <input type="number" id="maxCriteria" class="form-control" placeholder="הזן ערך מקסימלי..">
+            </div>
+        `;
+    } else if (type === 'TEXT') {
+        criteriaInputContainer.innerHTML = `
+            <div class="form-group">
+                <label for="criteria">קריטריונים:</label>
+                <input type="text" id="criteria" class="form-control" placeholder="הזן קריטריונים..">
+            </div>
+        `;
+    } else if (type === 'BOOLEAN') {
+        criteriaInputContainer.innerHTML = `
+            <div class="form-group">
+                <label for="criteria">קריטריונים:</label>
+                <select id="criteria" class="form-control">
+                    <option value="true">כן</option>
+                    <option value="false">לא</option>
+                </select>
+            </div>
+        `;
+    } else if (type === 'TIMESTAMP') {
+        criteriaInputContainer.innerHTML = `
+            <div class="form-group">
+                <label for="minCriteria">מינימום:</label>
+                <input type="date" id="minCriteria" class="form-control">
+            </div>
+            <div class="form-group">
+                <label for="maxCriteria">מקסימום:</label>
+                <input type="date" id="maxCriteria" class="form-control">
+            </div>
+        `;
+    } else if (type != null) {
+        console.error(`Invalid type ${type}`);
+    }
+}
+
+function addFilter() {
+    const property = document.getElementById('property').value;
+    const type = document.getElementById('property').selectedOptions[0].getAttribute('data-type');
+    let criteria;
+
+    if (type === 'INTEGER' || type === 'FLOAT' || type === 'TIMESTAMP') {
+        const min = document.getElementById('minCriteria').value;
+        const max = document.getElementById('maxCriteria').value;
+        criteria = { min, max };
+    } else if (type === 'TEXT' || type === 'BOOLEAN') {
+        criteria = document.getElementById('criteria').value;
+    }else {
+        console.error('Invalid type');
+    }
+
+
+    if (property && criteria) {
+        filters.push({ property, type, criteria });
+        updateActiveFilters();
+        filterCheckboxes();
+        document.getElementById('filterModal').style.display = 'none';
+    }
+}
+
+function updateActiveFilters() {
+    const activeFiltersContainer = document.getElementById('activeFilters');
+    activeFiltersContainer.innerHTML = '';
+
+    filters.forEach((filter, index) => {
+        let filterText;
+        if (filter.type === 'INTEGER' || filter.type === 'FLOAT' || filter.type === 'TIMESTAMP') {
+            // filterText = `${filter.property}: Min=${filter.criteria.min}, Max=${filter.criteria.max}`;
+            filterText = `${filter.criteria.min} ≤ ${filter.property} ≤ ${filter.criteria.max}`;
+        } else if (filter.type === 'TEXT') {
+            // filterText = `${filter.property} כולל ${filter.criteria}`;
+            filterText = `${filter.criteria} ⊆ ${filter.property}`;
+        }
+        else if (filter.type === 'BOOLEAN') {
+            filterText = `${filter.property} = ${filter.criteria}`;
+        }else {
+            console.error('Invalid type');
+        }
+        const filterElement = document.createElement('div');
+        filterElement.className = 'filter';
+        filterElement.innerHTML = `
+            <span type="button" class="filter-close" onclick="removeFilter(${index})">&times;</span>
+            ${filterText}
+        `;
+        activeFiltersContainer.appendChild(filterElement);
+    });
+}
+
+function removeFilter(index) {
+    filters.splice(index, 1);
+    updateActiveFilters();
+    filterCheckboxes();
+}
+
+function initNewChatModal(){
+    // set default attributes
+    fetch('/get_attributes', {
         method: 'GET',
         headers: {
             'Content-Type': 'application/json'
         }
     }).then(response => response.json())
     .then(data => {
-        data.forEach(model => {
-            const option = document.createElement('option');
-            option.value = model;
-            option.textContent = model;
-            modelSelect.appendChild(option);
+        document.getElementById('chatSystemMessage').value = data.system_message;
+        document.getElementById('chatModelName').value = data.model;
+        document.getElementById('chatDocLLMName').value = data.doc_llm;
+        document.getElementById('chatNumRetrievalDocs').value = data.num_chunks;
+    })
+}
+
+function initSettingsModal(){
+    fetch('/get_attributes', {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    }).then(response => response.json())
+    .then(data => {    
+        document.getElementById('systemMessage').value = data.system_message;
+        document.getElementById('modelName').value = data.model;
+        document.getElementById('docLLMName').value = data.doc_llm;
+        document.getElementById('numRetrievalDocs').value = data.num_chunks;
+    })
+}
+
+function setElementValue(elementId, value) {
+    document.getElementById(elementId).innerHTML = value;
+}
+
+function editRow(docId) {
+    const row = document.getElementById(`row-${docId}`);
+    row.querySelectorAll('.editable-cell').forEach(cell => {
+        const column = cell.getAttribute('data-column');
+        if (column === 'id') {
+            return;
+        }
+        const cellValue = cell.textContent.trim()
+        // escape cell values
+        const cellValueEscaped = cellValue.replace(/"/g, '&quot;');
+        cell.innerHTML = `<input type="text" class="editable-input" value="${cellValueEscaped}" data-column="${column}">`;
+        cell.classList.add('editing');
+    });
+    document.getElementById(`save-btn-${docId}`).classList.remove('d-none');
+    document.getElementById(`edit-btn-${docId}`).classList.add('d-none');
+}
+
+function saveRow(docId) {
+    const row = document.getElementById(`row-${docId}`);
+    const updatedData = {};
+    row.querySelectorAll('.editable-input').forEach(input => {
+        const column = input.getAttribute('data-column');
+        updatedData[column] = input.value.trim();
+        const cell = input.parentElement;
+        cell.innerHTML = input.value.trim();
+        cell.classList.remove('editing');
+    });
+
+    // Send AJAX request to update the document
+    fetch(`/document/${docId}`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(updatedData)
+    }).then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            console.log('Document updated successfully');
+        } else {
+            console.error('Failed to update document');
+        }
+    }).catch(error => console.error('Error:', error));
+    document.getElementById(`save-btn-${docId}`).classList.add('d-none');
+    document.getElementById(`edit-btn-${docId}`).classList.remove('d-none');
+}
+
+function deleteRow(docId) {
+    const row = document.getElementById(`row-${docId}`);
+    row.remove();
+    // Send AJAX request to delete the document
+    fetch(`/document/${docId}`, {
+        method: 'DELETE'
+    }).then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            console.log('Document deleted successfully');
+        } else {
+            console.error('Failed to delete document');
+        }
+    }).catch(error => console.error('Error:', error));
+}
+
+function downloadDocument(docId) {
+    fetch(`/document`, {
+        method: 'GET',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({doc_id: docId})
+    }).then(response => response.blob())
+}
+
+function addColumn(col_name, col_desc, col_type, model, num_docs, is_full_doc, num_queries) {
+    fetch('/column', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({name: col_name, description: col_desc, type: col_type, model: model, num_retrieval_docs: num_docs, is_full_doc: is_full_doc, num_queries: num_queries})
+    }).then(response => response.json())
+    .then(data => {
+        if (data.status === 'ok') {
+            $('#addColumnModal').css('display', 'none');
+            console.log('Column added successfully');
+            location.reload();
+        } else {
+            console.error(`Failed to add column: ${data.message}`);
+            // TODO show error message
+            $('#addColumnForm').find('button[type="submit"]').html('הוסף עמודה');
+            $('#addColumnForm').find('input, select, textarea').prop("disabled", false);
+            $('#addColumnForm').find('.alert').removeClass('d-none');
+            $('#addColumnForm').find('.alert').text(data.message);
+        }
+    }).catch(error => console.error('Error:', error));
+}
+
+function deleteColumn(col_name) {
+    fetch('/column', {
+        method: 'DELETE',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({name: col_name})
+    }).then(response => response.json())
+    .then(data => {
+        if (data.status === 'ok') {
+            const table = document.getElementById('documentsTable');
+            const header = table.querySelector('thead tr');
+            const colIndex = [...header.children].findIndex(col => col.innerText.trim() === col_name);
+            header.removeChild(header.children[colIndex]);
+            const rows = table.querySelectorAll('tbody tr');
+            rows.forEach(row => {
+                row.removeChild(row.children[colIndex]);
+            });
+        } else {
+            console.error(`Failed to delete column: ${data.message}`);
+        }
+    }).catch(error => console.error('Error:', error));
+}
+
+function deleteContactMessage(message_id) {
+    fetch('/contact', {
+        method: 'DELETE',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({id:message_id})
+    }).then(response => response.json())
+    .then(data => {
+        if (data.status === 'ok') {
+            // refresh page
+            location.reload();
+        } else {
+            console.error(`Failed to delete message: ${data.message}`);
+        }
+    }
+    ).catch(error => console.error('Error:', error));
+}
+
+function setAboutEditing() {
+    $("#aboutText").hide();
+    $("#aboutEdit").show();
+}
+
+function onLoad() {
+    // Event listener for opening modal
+    const modalBtns = document.querySelectorAll('[data-toggle="modal"]');
+    for(const btn of modalBtns){
+        btn.addEventListener('click', function() {
+            const modal = document.querySelector(btn.getAttribute('data-target'));
+            // call modal callback function
+            const callback_str = modal.getAttribute('data-callback');
+            if (callback_str) {
+                // evaluate callback function
+                eval(callback_str);
+            }
+            modal.style.display = 'block';
+        });
+    }
+    // Event listener for closing modal
+    const closeModals = document.querySelectorAll('.modal .close');
+    for(const closeModal of closeModals){
+        closeModal.addEventListener('click', function(e) {
+            const modal_id = e.target.parentElement.parentElement.parentElement.id;
+            document.getElementById(modal_id).style.display = 'none';
+        });
+    }
+    
+    // Close the modal when clicking outside of it
+    window.addEventListener('click', function(event) {
+        const modals = document.querySelectorAll('.modal');
+        modals.forEach(modal => {
+            if (event.target === modal) {
+                modal.style.display = 'none';
+            }
+        });
+    });
+    $(".loader-container").hide();
+}
+
+function onLoadIndex() {
+    onLoad();
+    // on chat type change show/hide retrieval fields in create new chat modal
+    const modeSelect = document.getElementById('chatType');
+
+    modeSelect.addEventListener('change', function() {
+        const selectedMode = modeSelect.value;
+        const retrieval_fields = document.getElementById('retrievalFields');
+        if (selectedMode === 'agent') {
+            retrieval_fields.style.display = 'block';
+        } else {
+            retrieval_fields.style.display = 'none';
+        }
+    });
+
+    // Load previous chats
+    fetch('/get_conversations').then(response => response.json())
+    .then(data => {
+        data.forEach(conversation => {
+            const chat = create_new_chat(conversation.id, conversation.title);
+            chats[conversation.id] = {messages: conversation.messages, title: conversation.title};
+            for (const message of conversation.messages) {
+                const { type, content, tool_calls, tool_call_id } = JSON.parse(message);
+    
+                if (type === 'ai') {
+                    if (content) {
+                        append_message(content, type, conversation.id);
+                    }
+                    tool_calls.forEach(tool_call => {
+                        append_message(tool_call, 'tool_call', conversation.id);
+                    });
+                } else if (type === 'tool') {
+                    append_message({result: content, tool_call_id}, 'tool_message', conversation.id);
+                }else if (type === 'human') {
+                    append_message(content, type, conversation.id);
+                }
+            }
         });
     })
 
     // Event listener for starting a new chat
-    newChatBtn.addEventListener('click', function() {
-        cleanChat();
-    });
+    document.getElementById('createNewChat').addEventListener('click', function() {
+        const selectedMode = document.getElementById('chatType').value;
+        const selectedDocs = [...document.getElementById("documentsCheckboxes").querySelectorAll('input:checked')].map(doc => doc.value);
+        const systemMessage = document.getElementById('chatSystemMessage').value;
+        const model = document.getElementById('chatModelName').value;
+        const docLLM = document.getElementById('chatDocLLMName').value;
+        const numRetrievalDocs = document.getElementById('chatNumRetrievalDocs').value;
 
-    clearDataBtn.addEventListener('click', function() {
-        fetch('/clear_data').catch(error => console.error('Error:', error));
-    });
-    // Event listener for changing chat mode
-    chatModeList.addEventListener('click', function(e) {
-        if (e.target.tagName === 'LI') {
-            const selectedMode = e.target.getAttribute('data-mode');
-            // toggle active class on the selected mode
-            chatModeList.querySelectorAll('li').forEach(li => {
-                if (li.getAttribute('data-mode') === selectedMode) {
-                    li.classList.add('active');
-                } else {
-                    li.classList.remove('active');
-                }
-            });
-            
-            // Handle chat mode change logic here
-            console.log('Chat mode changed to:', selectedMode);
-        }
-    });
-
-    // Event listener for opening the system message modal
-    editSettingBtn.addEventListener('click', function() {
-        settingModal.style.display = 'block';
-        fetch('/get_attributes', {
-            method: 'GET',
+        document.getElementById('newChatModal').style.display = 'none';
+        // TODO create new chat and show it
+        fetch('/chat', {
+            method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
-            }
+            },
+            body: JSON.stringify({
+                mode: selectedMode,
+                documents: selectedDocs,
+                system_message: systemMessage,
+                model: model,
+                num_chunks: numRetrievalDocs,
+                doc_llm: docLLM
+            })
         }).then(response => response.json())
         .then(data => {
-            console.log(data);
-            systemMessageTextarea.value = data.system_message;
-            modelSelect.value = data.model;
-            numRetrievalDocsInput.value = data.num_chunks;
-        })
-
-    });
-    
-    
-    // Event listener for closing the system message modal
-    closeModal.addEventListener('click', function() {
-        settingModal.style.display = 'none';
+            const {conversation_id, title} = data;
+            // chats[conversation_id] = {messages: [], title: title, mode: selectedMode};
+            const chat = create_new_chat(conversation_id, title);
+            display_chat(conversation_id);
+            currentChat = conversation_id;
+        }).catch(error => console.error('Error:', error));
     });
 
-    // Event listener for saving system message
-    saveSettingBtn.addEventListener('click', function() {
-        const systemMessage = systemMessageTextarea.value;
-        const model = modelSelect.value;
-        const numRetrievalDocs = numRetrievalDocsInput.value;
+    // Event listener for saving settings
+    document.getElementById('saveSettingsBtn').addEventListener('click', function() {
+        const systemMessage = document.getElementById('systemMessage').value;
+        const model = document.getElementById('modelName').value;
+        const numRetrievalDocs = document.getElementById('numRetrievalDocs').value;
+        const docLLM = document.getElementById('docLLMName').value;
         fetch('/set_attributes', {
             method: 'POST',
             headers: {
@@ -323,43 +725,88 @@ function onLoad() {
             body: JSON.stringify({ 
                 system_message: systemMessage, 
                 model: model, 
-                num_chunks: numRetrievalDocs })
+                num_chunks: numRetrievalDocs,
+                doc_llm:  docLLM
+                })
         }).catch(error => console.error('Error:', error));
 
         // Handle system message saving logic here
         settingModal.style.display = 'none';
     });
-
-    // Load previous chats (this is a placeholder, replace with your actual implementation)
-    const previousChats = ['Chat 1', 'Chat 2', 'Chat 3'];
-    previousChats.forEach(chat => {
-        const li = document.createElement('li');
-        li.textContent = chat;
-        li.addEventListener('click', function() {
-            console.log('Loading chat:', chat);
-
-            // Handle loading of the selected previous chat
-        });
-        chatList.appendChild(li);
-    });
     
-    // Close the modal when clicking outside of it
-    window.addEventListener('click', function(event) {
-        const settingModal = document.getElementById('settingModal');
-        if (event.target === settingModal) {
-            settingModal.style.display = 'none';
-        }
-    });
-    
+    // const clearDataBtn = document.getElementById('clearDataBtn');
+    // clearDataBtn.addEventListener('click', function() {
+    //     fetch('/clear_data').catch(error => console.error('Error:', error));
+    // });
+
+
     // Event listener for sending a new chat message
     messageInput.addEventListener('keypress', function(e) {
         if (e.key === 'Enter') {
-            sendAgentMessage();
+            sendMessage();
         }
     });
-    document.getElementById('uploadBtn').addEventListener('click', sendAgentMessage);
+    document.getElementById('uploadBtn').addEventListener('click', sendMessage);
+    updateCriteriaInput();
 
+    // append_message("ברוך הבא לUrbanGPT! תוכל לשאול אותי כל שאלה שתרצה", "info");
 
+}
 
-    append_message("ברוך הבא לUrbanGPT! תוכל לשאול אותי כל שאלה שתרצה", "ai");
+function onLoadDashboard() {
+    onLoad();
+    $('[data-toggle="tooltip"]').tooltip();
+    $('[data-toggle2="tooltip"').tooltip();
+    $('#is_full_doc').change((e)=>{
+        if (e.target.checked){
+            $('#num_chunks_input_group').hide()
+            // $('#num_retrieval_docs')
+        }else{
+            $('#num_chunks_input_group').show()
+        }
+    });
+    $('#addColumnForm').submit(function(e) {
+        e.preventDefault();
+        const col_name = document.getElementById('column_name');
+        const col_desc = document.getElementById('column_description');
+        const col_type = document.getElementById('column_type');    
+        const model = document.getElementById('model_name');
+        const num_docs = document.getElementById('num_retrieval_docs');
+        const is_full_doc = document.getElementById('is_full_doc');
+        const num_queries = document.getElementById('num_queries');
+
+        const columnNameRegex = /^[a-zA-Z_][a-zA-Z0-9_]{0,62}$/;
+
+        if (!columnNameRegex.test(col_name.value)) {
+            // Show alert message
+            columnAlert.textContent = 'Invalid column name. Column name must start with a letter, contain only letters, numbers, and underscores, and be at most 63 characters long.';
+            columnAlert.classList.remove('d-none');
+            columnAlert.classList.add('alert-danger');
+        } else {
+            columnAlert.classList.add('d-none');
+            $('#addColumnForm').find('button[type="submit"]').html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> יוצר עמודה...');
+            $('#addColumnForm').find('input, select, textarea').prop("disabled", true);    
+            addColumn(col_name.value, col_desc.value, col_type.value, model.value, num_docs.value, is_full_doc.checked, num_queries.value);
+        }
+    });
+    $('#uploadDocumentForm').submit(function(e) {
+        e.preventDefault();
+        $('#uploadDocumentForm').find('button[type="submit"]').html('<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> Uploading...');
+        const formData = new FormData(this);
+        fetch('/document', {
+            method: 'POST',
+            body: formData,
+            enctype: 'multipart/form-data'
+        }).then(response => response.json())
+        .then(data => {
+            // show spinner
+            $('#uploadDocumentModal').css('display', 'none');
+            if (data.success) {
+                location.reload();
+
+            } else {
+                console.error('Failed to add document');
+            }
+        }).catch(error => console.error('Error:', error));
+    });
 }

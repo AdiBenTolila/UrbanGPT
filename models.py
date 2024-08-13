@@ -28,6 +28,7 @@ from langchain_huggingface import HuggingFacePipeline, ChatHuggingFace, HuggingF
 # from langchain_community.embeddings import HuggingFaceEmbeddings
 from transformers import BitsAndBytesConfig
 from langchain.prompts import PromptTemplate
+import tiktoken
 
 import torch
 import time
@@ -164,9 +165,9 @@ def get_huggingface_llm(model_name):
     assert os.environ.get("HUGGINGFACEHUB_API_TOKEN") is not None, "Please set the HUGGINGFACEHUB_API_TOKEN environment variable"
     quantization_config = BitsAndBytesConfig(
         load_in_4bit=True,
-        bnb_4bit_quant_type="nf4",
+        # bnb_4bit_quant_type="nf4",
         bnb_4bit_compute_dtype="float16",
-        bnb_4bit_use_double_quant=True
+        # bnb_4bit_use_double_quant=True
         # load_in_8bit=True,
         # llm_int8_threshold = 6.
     )
@@ -209,6 +210,7 @@ model_map = {
     "openai-gpt-4o": lambda **kwargs: get_openai_llm("gpt-4o", **kwargs),
     "openai-gpt-4o-mini": lambda **kwargs: get_openai_llm("gpt-4o-mini", **kwargs),
     "hf-gemma-2-9b-it": lambda **kwargs: get_huggingface_chat("google/gemma-2-9b-it", **kwargs),
+    "hf-gemma-2-2b-it": lambda **kwargs: get_huggingface_chat("google/gemma-2-2b-it", **kwargs),
     "hf-dictalm2.0-instruct": lambda **kwargs: get_huggingface_chat("dicta-il/dictalm2.0-instruct", **kwargs),
     "hf-Qwen2-7B-Instruct": lambda **kwargs: get_huggingface_chat("Qwen/Qwen2-7B-Instruct", **kwargs),
     "hf-Meta-Llama-3.1-8B-Instruct": lambda **kwargs: get_huggingface_chat("meta-llama/Meta-Llama-3.1-8B-Instruct", **kwargs),
@@ -219,6 +221,21 @@ def get_llm(name="openai-gpt-4o-mini", **kwargs):
     else:
         logger.error(f"Model {name} not found in model_map, using default model")
         return get_openai_llm("gpt-4o-mini")
+
+
+def openai_count_tokens(string: str, encoding_name: str) -> int:
+    """counts number of tokens in a string using the specified encoding from openai
+
+    Args:
+        string (str): string to tokenize
+        encoding_name (str): encoding name, for gpt-4o use o200k_base and for any other model use cl100k_base
+
+    Returns:
+        int: number of tokens in the string
+    """
+    encoding = tiktoken.get_encoding(encoding_name)
+    num_tokens = len(encoding.encode(string))
+    return num_tokens
 
 if __name__ == '__main__':
     llm = get_huggingface_chat("dicta-il/dictalm2.0-instruct")

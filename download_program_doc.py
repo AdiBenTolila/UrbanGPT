@@ -26,22 +26,22 @@ def generate_url(data_dict, program_number):
 
 #takes a program number and returns the xplan number
 def extract_xplan_number(program_number):
-    # URL from which to fetch the JSON data
-    url = "https://ags.iplan.gov.il/arcgisiplan/rest/services/PlanningPublic/Xplan/MapServer/1/query?f=json&where=pl_number%20LIKE%20%27" + program_number + "%25%27&returnGeometry=true&spatialRel=esriSpatialRelIntersects&outFields=pl_number%2Cpl_name%2Cpl_url%2Cpl_area_dunam%2Cquantity_delta_120%2Cstation_desc%2Cpl_date_advertise%2Cpl_date_8%2Cplan_county_name%2Cpl_landuse_string&orderByFields=pl_number"
-    #print(url)
-    # Send a GET request to the URL
-    response = requests.get(url)
-    # Parse the response as JSON
-    parsed_data = json.loads(response.text)
-    #print(parsed_data)
-
-    # Load the data into a Python object
+    parsed_data = extract_xplan_attributes(program_number)
     # Extract the URL
-    url = parsed_data["features"][0]["attributes"]["pl_url"]
+    url = parsed_data["pl_url"]
     # Extract the number from the URL
     iplan_number = url.split('/')[-2]
 
     return iplan_number
+
+def extract_xplan_attributes(program_number):
+    # URL from which to fetch the JSON data
+    url = f"https://ags.iplan.gov.il/arcgisiplan/rest/services/PlanningPublic/Xplan/MapServer/1/query?f=json&where=pl_number LIKE '{program_number}%'&returnGeometry=true&spatialRel=esriSpatialRelIntersects&outFields=*&orderByFields=pl_number"
+    # Send a GET request to the URL
+    response = requests.get(url)
+    # Parse the response as JSON
+    parsed_data = json.loads(response.text)
+    return  parsed_data["features"][0]["attributes"]
 
 #takes a program number and returns a list of urls for the documents of the program
 def program_doc_url(iplan_number , doc_type , program_number):#change!!!!!!!!!!!!

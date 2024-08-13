@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block body_attr %}onload="onLoadDashboard()"{% endblock %}
+{% block content %}
+<div class="container" style="max-height: 90vh">
+    <h1>Manage Data</h1>
+    <div class="table-responsive">
+        <table class="table table-bordered" id="documentsTable">
+            <thead>
+                <tr>
+                    {% for column in columns %}
+                        <th data-type="{{ column.type }}" style="white-space: nowrap;">
+                            {{ column.name }}
+                            {% if column.name not in ['id','name'] %}
+                                <button class="btn btn-danger" onclick="deleteColumn('{{ column.name }}')" data-toggle="tooltip" title="Delete Column">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            {% endif %}
+                        </th>
+                    {% endfor %}
+                    <th  style="white-space: nowrap;">
+                        <button class="btn btn-success" data-toggle="modal" data-toggle2='tooltip' data-target="#uploadDocumentModal" title="Upload Document">
+                            <i class="fas fa-upload"></i>
+                        </button>
+                        <button class="btn btn-primary" data-toggle="modal" data-toggle2='tooltip' data-target="#addColumnModal" title="Add Column">
+                            <i class="fas fa-plus"></i>
+                        </button>
+                    </th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for doc in documents %}
+                <tr id="row-{{ doc.id }}">
+                    {% for column in columns %}
+                        <td class="editable-cell" data-column="{{ column.name }}" data-type="{{ column.type }}">{{ doc[column.name] }}</td>
+                    {% endfor %}
+                    <td  style="white-space: nowrap;">
+                        <a href="{{ url_for('document', doc_id=doc.id) }}" class="btn btn-info" data-toggle="tooltip" title="View">
+                            <i class="fas fa-eye"></i>
+                        </a>
+                        <button class="btn btn-warning" id="edit-btn-{{ doc.id }}" onclick="editRow('{{ doc.id }}')" data-toggle="tooltip" title="Edit">
+                            <i class="fas fa-edit"></i>
+                        </button>
+                        <button class="btn btn-success d-none" id="save-btn-{{ doc.id }}" onclick="saveRow('{{ doc.id }}')" data-toggle="tooltip" title="Save">
+                            <i class="fas fa-save"></i>
+                        </button>
+                        <button class="btn btn-danger" onclick="deleteRow('{{ doc.id }}')" data-toggle="tooltip" title="Delete">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Upload Document Modal -->
+<div id="uploadDocumentModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>העלה מסמך חדש</h2>
+            <span class="close">&times;</span>
+        </div>
+        <form id="uploadDocumentForm">
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="document">Select Document:</label>
+                    <input type="file" name="document" class="form-control" id="document">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="submit" class="btn btn-success">Upload</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Add Column Modal -->
+<div id="addColumnModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>הוסף עמודה חדשה</h2>
+            <span class="close">&times;</span>
+        </div>
+        <form id="addColumnForm">
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="column_name" class="form-label">שם העמודה:</label>
+                    <input type="text" name="column_name" class="form-control" id="column_name" required>
+                </div>
+                <div class="form-group">
+                    <label for="column_type">סוג העמודה:</label>
+                    <select name="column_type" class="form-control" id="column_type" required>
+                        <option selected="true" value="" disabled>בחר סוג עמודה</option>
+                        <option value="text">טקסט</option>
+                        <option value="numeric">מספר</option>
+                        <option value="boolean">בוליאני</option>
+                        <option value="date">תאריך</option>
+                    </select>
+                <div class="form-group">
+                    <label for="column_description">תיאור:</label>
+                    <textarea name="column_description" class="form-control" id="column_description" required></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="model_name">שם המודל:</label>
+                    <select name="model_name" class="form-control" id="model_name" required>
+                        <option selected="true" value="" disabled>בחר מודל</option>
+                        {% for model in models %}
+                            <option value="{{ model }}">{{ model }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <div id="num_chunks_input_group">
+                        <label for="num_retrieval_docs" class="form-label">מספר צ'אנקים למסמך:</label>
+                        <input type="range" class="form-control form-range" id="num_retrieval_docs" name="num_retrieval_docs" min="1" max="10" value="3" onchange="setElementValue('num_retrieval_docs_value', this.value)">
+                        <label for="num_retrieval_docs_value" class="form-label">ערך נוכחי: <span id="num_retrieval_docs_value">3</span></label>
+                    </div>
+                    <label for="is_full_doc">מסמך מלא:</label>
+                    <input type="checkbox" name="is_full_doc" class="form-checkbox" id="is_full_doc">
+                </div>
+                <div class="form-group">
+                    <label for="num_queries">מספר שאילתות:</label>
+                    <input type="range" class="form-control form-range" id="num_queries" name="num_queries" min="1" max="10" value="1" onchange="setElementValue('num_queries_value', this.value)">
+                    <label for="num_retrieval_docs_value" class="form-label">ערך נוכחי: <span id="num_queries_value">1</span></label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="submit" class="btn btn-primary">הוסף</button>
+                <div class='alert d-none' id='columnAlert'></div>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
